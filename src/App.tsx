@@ -6,6 +6,7 @@ import { PlotPanel } from './components/PlotPanel';
 import { Sidebar } from './components/Sidebar';
 import { TraceList } from './components/TraceList';
 import { useStore } from './state/store';
+import swtLogoUrl from './assets/spinwavetoolkit-logo-text.svg';
 
 function Header() {
   const theme = useStore((s) => s.theme);
@@ -13,12 +14,24 @@ function Header() {
   const swtVersion = useStore((s) => s.swtVersion);
 
   return (
-    <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-slate-900">
-      <div className="flex items-baseline gap-3">
-        <h1 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
-          SpinWave<span className="text-blue-600 dark:text-blue-400">Toolkit</span>{' '}
-          <span className="font-normal text-slate-400">Web</span>
-        </h1>
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <a
+          href="https://ceitecmagnonics.github.io/SpinWaveToolkit/stable/"
+          target="_blank"
+          rel="noreferrer noopener"
+          className="flex shrink-0 items-center rounded-md bg-white px-2 py-1 ring-1 ring-slate-200 transition hover:ring-slate-300 dark:ring-slate-700 dark:hover:ring-slate-500"
+        >
+          <img
+            src={swtLogoUrl}
+            alt="SpinWaveToolkit"
+            className="h-8 w-auto max-w-[min(62vw,18rem)]"
+          />
+        </a>
+        <h1 className="sr-only">SpinWaveToolkit Web</h1>
+        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+          Web
+        </span>
         {swtVersion && (
           <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
             SWT v{swtVersion} · in-browser
