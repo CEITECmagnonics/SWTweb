@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { buildJob, describeParams } from '../job';
 import { getMaterialPreset } from '../materials';
 import { getModel } from '../registry';
+import {
+  NA_MODE_KEY,
+  ND_MODE_KEY,
+  tensorEntries,
+  thinFilmDemagTensor,
+  uniaxialAnisotropyTensor,
+} from '../tensors';
 
 const base = {
   material: getMaterialPreset('NiFe').values,
@@ -40,6 +47,37 @@ describe('buildJob unit conversion', () => {
       modes: [2, 0],
     });
     expect(job.modes).toEqual([0, 2]);
+  });
+
+  it('forwards optional SingleLayer demag and anisotropy tensors', () => {
+    const material = getMaterialPreset('NiFe').values;
+    const na = uniaxialAnisotropyTensor(material, 10e3, Math.PI / 2, 0);
+    const job = buildJob({
+      modelId: 'SingleLayer',
+      paramValues: {
+        ...defaults('SingleLayer'),
+        [ND_MODE_KEY]: 'custom',
+        [NA_MODE_KEY]: 'custom',
+        ...tensorEntries('Nd', thinFilmDemagTensor()),
+        ...tensorEntries('Na', na),
+      },
+      quantityIds: ['dispersion'],
+      ...base,
+    });
+
+    expect(job.params.Nd).toEqual(thinFilmDemagTensor());
+    expect(job.params.Na).toEqual(na);
+  });
+
+  it('omits SingleLayer tensors when left at library defaults', () => {
+    const job = buildJob({
+      modelId: 'SingleLayer',
+      paramValues: defaults('SingleLayer'),
+      quantityIds: ['dispersion'],
+      ...base,
+    });
+    expect('Nd' in job.params).toBe(false);
+    expect('Na' in job.params).toBe(false);
   });
 
   it('maps empty nullable params: omit vs infinity', () => {
@@ -94,5 +132,6 @@ describe('buildJob unit conversion', () => {
     const desc = describeParams('SingleLayer', { ...defaults('SingleLayer'), Bext: 20 });
     expect(desc['External field']).toBe('20 mT');
     expect(desc['Boundary condition']).toMatch(/unpinned/i);
+    expect(desc['Demag tensor Nd']).toMatch(/default thin film/);
   });
 });

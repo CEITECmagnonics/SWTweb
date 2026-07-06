@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { GEOMETRY_PRESETS, getModel } from '../models/registry';
 import type { ParamDef } from '../models/types';
 import { useStore } from '../state/store';
+import { SingleLayerTensorTools } from './SingleLayerTensorTools';
 import { Button, FieldRow, inputClass, NumberInput } from './ui';
 
 function ParamField({ def }: { def: ParamDef }) {
@@ -102,6 +103,7 @@ export function ParamForm() {
               {advanced.map((p) => (
                 <ParamField key={p.key} def={p} />
               ))}
+              {model.id === 'SingleLayer' && <SingleLayerTensorTools />}
             </div>
           )}
         </>

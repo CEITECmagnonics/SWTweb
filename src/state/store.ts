@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import { buildJob, describeParams, type ParamValues } from '../models/job';
 import { getModel, MODELS } from '../models/registry';
+import { singleLayerTensorDefaults } from '../models/tensors';
 import type {
   BridgeResult,
   ComputeJob,
@@ -153,6 +154,7 @@ function defaultParamValues(modelId: ModelId): ParamValues {
   for (const def of [...model.params, ...(model.methodParams ?? [])]) {
     values[def.key] = def.default;
   }
+  if (modelId === 'SingleLayer') Object.assign(values, singleLayerTensorDefaults());
   return values;
 }
 

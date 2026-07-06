@@ -4,6 +4,13 @@ import { buildJob } from '../../models/job';
 import { describeParams } from '../../models/job';
 import { getMaterialPreset } from '../../models/materials';
 import { getModel, MODEL_LIST } from '../../models/registry';
+import {
+  NA_MODE_KEY,
+  ND_MODE_KEY,
+  tensorEntries,
+  thinFilmDemagTensor,
+  uniaxialAnisotropyTensor,
+} from '../../models/tensors';
 import type { ModelId } from '../../models/types';
 
 function makeInput(modelId: ModelId, quantityIds?: string[]) {
@@ -70,6 +77,38 @@ describe('generateNotebook', () => {
     expect(nb).toContain('SWT.NiFe');
     expect(nb).toContain('model=\\"original\\"');
     expect(nb).toContain('d_sc=np.inf');
+  });
+
+  it('reproduces custom SingleLayer tensors', () => {
+    const material = getMaterialPreset('NiFe').values;
+    const model = getModel('SingleLayer');
+    const na = uniaxialAnisotropyTensor(material, 10e3, Math.PI / 2, 0);
+    const paramValues = {
+      ...Object.fromEntries(model.params.map((p) => [p.key, p.default])),
+      [ND_MODE_KEY]: 'custom',
+      [NA_MODE_KEY]: 'custom',
+      ...tensorEntries('Nd', thinFilmDemagTensor()),
+      ...tensorEntries('Na', na),
+    };
+    const job = buildJob({
+      modelId: 'SingleLayer',
+      material,
+      paramValues,
+      kRange: model.kDefault,
+      modes: [0],
+      nT: 0,
+      quantityIds: ['dispersion'],
+    });
+    const nb = generateNotebook({
+      modelId: 'SingleLayer',
+      materialPresetId: 'NiFe',
+      material,
+      job,
+      paramsDisplay: describeParams('SingleLayer', paramValues),
+      swtVersion: '1.3.0',
+    });
+    expect(nb).toContain('Nd=[[0, 0, 0], [0, 0, 0], [0, 0, 1]]');
+    expect(nb).toContain('Na=[[');
   });
 
   it('escapes to valid JSON', () => {

@@ -7,7 +7,7 @@
 import { getModel } from '../models/registry';
 import { getMaterialPreset } from '../models/materials';
 import { SWT_CITATION, SWT_CITATION_BIBTEX, SWT_CITATION_TEXT } from '../models/citation';
-import type { ComputeJob, MaterialValues, ModelId, QuantityDef } from '../models/types';
+import type { ComputeJob, MaterialValues, Matrix3, ModelId, QuantityDef } from '../models/types';
 
 export interface NotebookInput {
   modelId: ModelId;
@@ -52,15 +52,26 @@ function code(text: string): NbCell {
 }
 
 /** Format a JS value as a Python literal. */
-function py(value: number | string | null): string {
+function isMatrix3(value: unknown): value is Matrix3 {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every((row) => Array.isArray(row) && row.length === 3)
+  );
+}
+
+function py(value: number | string | Matrix3 | null): string {
   if (value === null) return 'None';
+  if (isMatrix3(value)) {
+    return `[${value.map((row) => `[${row.map((v) => py(v)).join(', ')}]`).join(', ')}]`;
+  }
   if (value === 'inf') return 'np.inf';
   if (typeof value === 'string') return `"${value}"`;
   if (Number.isInteger(value) && Math.abs(value) < 1e15) return String(value);
   return String(value);
 }
 
-function pyKwargs(obj: Record<string, number | string> | undefined): string {
+function pyKwargs(obj: Record<string, number | string | Matrix3> | undefined): string {
   if (!obj) return '';
   return Object.entries(obj)
     .map(([k, v]) => `${k}=${py(v)}`)

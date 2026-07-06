@@ -3,6 +3,14 @@
  * using the model registry as the conversion table.
  */
 import { getModel } from './registry';
+import {
+  formatMatrix,
+  matrixFromValues,
+  NA_MODE_KEY,
+  ND_MODE_KEY,
+  thinFilmDemagTensor,
+  zeroTensor,
+} from './tensors';
 import type { ComputeJob, KRange, MaterialValues, ModelId, ParamDef } from './types';
 
 export type ParamValues = Record<string, number | string | null>;
@@ -33,6 +41,15 @@ function convertGroup(defs: ParamDef[], values: ParamValues): Record<string, num
     if (converted !== null) out[def.key] = converted;
   }
   return out;
+}
+
+function applySingleLayerTensors(job: ComputeJob, values: ParamValues): void {
+  if (values[ND_MODE_KEY] === 'custom') {
+    job.params.Nd = matrixFromValues(values, 'Nd', thinFilmDemagTensor());
+  }
+  if (values[NA_MODE_KEY] === 'custom') {
+    job.params.Na = matrixFromValues(values, 'Na', zeroTensor());
+  }
 }
 
 export interface JobInput {
@@ -69,6 +86,10 @@ export function buildJob(input: JobInput): ComputeJob {
     })),
   };
 
+  if (input.modelId === 'SingleLayer') {
+    applySingleLayerTensors(job, input.paramValues);
+  }
+
   if (model.methodParams) {
     job.methodKwargs = convertGroup(model.methodParams, input.paramValues);
   }
@@ -91,6 +112,16 @@ export function describeParams(modelId: ModelId, values: ParamValues): Record<st
     } else {
       out[def.label] = `${v}${def.unit ? ` ${def.unit}` : ''}`;
     }
+  }
+  if (modelId === 'SingleLayer') {
+    out['Demag tensor Nd'] =
+      values[ND_MODE_KEY] === 'custom'
+        ? formatMatrix(matrixFromValues(values, 'Nd', thinFilmDemagTensor()))
+        : 'library default thin film diag(0, 0, 1)';
+    out['Anisotropy tensor Na'] =
+      values[NA_MODE_KEY] === 'custom'
+        ? formatMatrix(matrixFromValues(values, 'Na', zeroTensor()))
+        : 'none';
   }
   return out;
 }

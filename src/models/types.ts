@@ -15,6 +15,8 @@ export type ModelId =
 
 export type ParamKind = 'number' | 'int' | 'angle' | 'choice';
 
+export type Matrix3 = [[number, number, number], [number, number, number], [number, number, number]];
+
 export interface ParamChoice {
   value: number | string;
   label: string;
@@ -147,8 +149,8 @@ export interface ComputeJob {
   model: ModelId;
   material: MaterialValues;
   material2?: MaterialValues;
-  params: Record<string, number | string>;
-  methodKwargs?: Record<string, number | string>;
+  params: Record<string, number | string | Matrix3>;
+  methodKwargs?: Record<string, number | string | Matrix3>;
   kRange: KRange;
   modes: number[];
   nT: number;
