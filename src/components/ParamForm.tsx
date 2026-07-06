@@ -46,7 +46,7 @@ function ParamField({ def }: { def: ParamDef }) {
   );
 }
 
-export function ParamForm() {
+export function ParamForm({ exclude = [] }: { exclude?: string[] }) {
   const modelId = useStore((s) => s.modelId);
   const applyGeometry = useStore((s) => s.applyGeometry);
   const theta = useStore((s) => s.paramValues[s.modelId]['theta']);
@@ -54,7 +54,9 @@ export function ParamForm() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const model = getModel(modelId);
 
-  const allParams = [...model.params, ...(model.methodParams ?? [])];
+  const allParams = [...model.params, ...(model.methodParams ?? [])].filter(
+    (p) => !exclude.includes(p.key),
+  );
   const basic = allParams.filter((p) => !p.advanced);
   const advanced = allParams.filter((p) => p.advanced);
 

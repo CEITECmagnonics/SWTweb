@@ -1,6 +1,37 @@
 /** CSV / JSON serialization of computed traces, with parameter provenance. */
 import type { PlotTrace, ScalarResult } from '../state/store';
 
+/** Generic CSV for sweep/hysteresis results: one x column, one column per series. */
+export function simpleCsv(
+  headerLines: string[],
+  xLabel: string,
+  series: Array<{ name: string; x: number[]; y: (number | null)[] }>,
+): string {
+  const lines = headerLines.map((l) => `# ${l}`);
+  if (series.length === 0) return lines.join('\n') + '\n';
+  const shared = series.every(
+    (s) => s.x.length === series[0].x.length && s.x.every((v, i) => v === series[0].x[i]),
+  );
+  if (shared) {
+    lines.push([xLabel, ...series.map((s) => s.name)].join(','));
+    for (let i = 0; i < series[0].x.length; i++) {
+      lines.push(
+        [String(series[0].x[i]), ...series.map((s) => (s.y[i] === null ? '' : String(s.y[i])))].join(
+          ',',
+        ),
+      );
+    }
+  } else {
+    lines.push(['series', xLabel, 'value'].join(','));
+    for (const s of series) {
+      for (let i = 0; i < s.x.length; i++) {
+        lines.push([s.name, String(s.x[i]), s.y[i] === null ? '' : String(s.y[i])].join(','));
+      }
+    }
+  }
+  return lines.join('\n') + '\n';
+}
+
 function provenanceHeader(traces: PlotTrace[], swtVersion: string | null): string[] {
   const lines: string[] = [
     '# SpinWaveToolkit Web export',

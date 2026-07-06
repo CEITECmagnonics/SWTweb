@@ -1,15 +1,20 @@
 /** Central application state (zustand). */
 import { create } from 'zustand';
-import { buildJob, describeParams, type ParamValues } from '../models/job';
+import { buildJob, describeGroup, describeParams, type ParamValues } from '../models/job';
+import { MACROSPIN_PARAMS } from '../models/macrospin';
 import { getModel, MODELS } from '../models/registry';
+import { buildHystJob, buildSweepJob, defaultSweepRange, sweepableParams } from '../models/sweep';
 import { singleLayerTensorDefaults } from '../models/tensors';
 import type {
   BridgeResult,
   ComputeJob,
+  HystResult,
   KRange,
   MaterialValues,
   ModelId,
   QuantityDef,
+  SweepModelId,
+  SweepResult,
 } from '../models/types';
 import { getMaterialPreset } from '../models/materials';
 import type { KUnitId } from '../models/units';
@@ -100,6 +105,68 @@ export interface PlotSettings {
 
 export type EngineStatus = 'boot' | 'loading' | 'ready' | 'computing' | 'error';
 
+export type PageId = 'dispersion' | 'sweep' | 'hysteresis';
+
+export interface SweepMeta {
+  /** The exact job that produced the result (SI) — used for notebook export. */
+  job: import('../models/types').SweepJob;
+  modelId: SweepModelId;
+  modelLabel: string;
+  key: string;
+  paramLabel: string;
+  paramUnit: string;
+  paramToSI: number;
+  quantityId: string;
+  mode: 'fixedK' | 'map';
+  kFixed: number;
+  relax: boolean;
+  materialPresetId: string;
+  materialPresetId2?: string;
+  paramsDisplay: Record<string, string>;
+  timestamp: string;
+}
+
+export interface SweepState {
+  modelId: SweepModelId;
+  key: string;
+  from: number;
+  to: number;
+  points: number;
+  mode: 'fixedK' | 'map';
+  /** display, rad/µm */
+  kFixed: number;
+  quantityId: string;
+  relax: boolean;
+  status: 'idle' | 'running';
+  error: string | null;
+  result: SweepResult | null;
+  meta: SweepMeta | null;
+}
+
+export interface HystMeta {
+  /** The exact job that produced the result (SI) — used for notebook export. */
+  job: import('../models/types').HystJob;
+  type: 'single' | 'double';
+  Bmax: number;
+  materialPresetId: string;
+  materialPresetId2?: string;
+  paramsDisplay: Record<string, string>;
+  timestamp: string;
+}
+
+export interface HystState {
+  type: 'single' | 'double';
+  /** display, mT */
+  Bmax: number;
+  /** points per branch */
+  points: number;
+  view: 'projection' | 'angles';
+  status: 'idle' | 'running';
+  error: string | null;
+  result: HystResult | null;
+  meta: HystMeta | null;
+}
+
 interface AppState {
   engineStatus: EngineStatus;
   engineStage: EngineStage | null;
@@ -107,6 +174,11 @@ interface AppState {
   computeError: string | null;
   swtVersion: string | null;
   pyodideVersion: string | null;
+
+  page: PageId;
+  macrospinValues: ParamValues;
+  sweep: SweepState;
+  hyst: HystState;
 
   modelId: ModelId;
   materialPresetId: string;
@@ -146,6 +218,16 @@ interface AppState {
   clearResults: () => void;
   setPlotSettings: (patch: Partial<PlotSettings>) => void;
   toggleTheme: () => void;
+
+  setPage: (page: PageId) => void;
+  setMacrospinValue: (key: string, value: number | string | null) => void;
+  setSweepModel: (id: SweepModelId) => void;
+  setSweepKey: (key: string) => void;
+  patchSweep: (patch: Partial<SweepState>) => void;
+  runSweep: () => Promise<void>;
+  patchHyst: (patch: Partial<HystState>) => void;
+  setHystType: (type: 'single' | 'double') => void;
+  runHysteresis: () => Promise<void>;
 }
 
 function defaultParamValues(modelId: ModelId): ParamValues {
@@ -186,6 +268,40 @@ function prefersDark(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
+export function pageFromHash(): PageId {
+  if (typeof window === 'undefined') return 'dispersion';
+  const h = window.location.hash;
+  if (h.startsWith('#/sweep')) return 'sweep';
+  if (h.startsWith('#/hysteresis')) return 'hysteresis';
+  return 'dispersion';
+}
+
+const initialMacrospinValues = Object.fromEntries(
+  MACROSPIN_PARAMS.map((p) => [p.key, p.default]),
+) as ParamValues;
+
+function initialSweepState(): SweepState {
+  const def = sweepableParams('SingleLayer').find((p) => p.key === 'Bext')!;
+  const range = defaultSweepRange(def);
+  return {
+    modelId: 'SingleLayer',
+    key: 'Bext',
+    ...range,
+    mode: 'fixedK',
+    kFixed: 0,
+    quantityId: 'dispersion',
+    relax: false,
+    status: 'idle',
+    error: null,
+    result: null,
+    meta: null,
+  };
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export const useStore = create<AppState>((set, get) => ({
   engineStatus: 'boot',
   engineStage: null,
@@ -193,6 +309,20 @@ export const useStore = create<AppState>((set, get) => ({
   computeError: null,
   swtVersion: null,
   pyodideVersion: null,
+
+  page: pageFromHash(),
+  macrospinValues: { ...initialMacrospinValues },
+  sweep: initialSweepState(),
+  hyst: {
+    type: 'single',
+    Bmax: 100,
+    points: 101,
+    view: 'projection',
+    status: 'idle',
+    error: null,
+    result: null,
+    meta: null,
+  },
 
   modelId: 'SingleLayer',
   materialPresetId: 'NiFe',
@@ -374,6 +504,159 @@ export const useStore = create<AppState>((set, get) => ({
   setPlotSettings: (patch) => set((s) => ({ plotSettings: { ...s.plotSettings, ...patch } })),
 
   toggleTheme: () => set((s) => ({ theme: s.theme === 'light' ? 'dark' : 'light' })),
+
+  setPage: (page) => {
+    if (typeof window !== 'undefined') {
+      const hash = page === 'dispersion' ? '#/' : `#/${page}`;
+      if (window.location.hash !== hash) window.history.replaceState(null, '', hash);
+    }
+    set({ page });
+  },
+
+  setMacrospinValue: (key, value) =>
+    set((s) => ({ macrospinValues: { ...s.macrospinValues, [key]: value } })),
+
+  setSweepModel: (id) =>
+    set((s) => {
+      const params = sweepableParams(id);
+      const def = params.find((p) => p.key === 'Bext') ?? params[0];
+      const range = defaultSweepRange(def);
+      const quantityId = id === 'Macrospin' ? 'projection' : getModel(id).quantities[0].id;
+      return {
+        // Keep the shared model forms in sync so the sweep uses the same
+        // parameters the user configured on the dispersion page.
+        ...(id !== 'Macrospin' ? { modelId: id } : {}),
+        sweep: {
+          ...s.sweep,
+          modelId: id,
+          key: def.key,
+          ...range,
+          quantityId,
+          relax: id === 'DoubleLayerNumeric',
+          result: null,
+          meta: null,
+          error: null,
+        },
+      };
+    }),
+
+  setSweepKey: (key) =>
+    set((s) => {
+      const def = sweepableParams(s.sweep.modelId).find((p) => p.key === key);
+      const range = def ? defaultSweepRange(def) : {};
+      return { sweep: { ...s.sweep, key, ...range } };
+    }),
+
+  patchSweep: (patch) => set((s) => ({ sweep: { ...s.sweep, ...patch } })),
+
+  runSweep: async () => {
+    const s = get();
+    if (!engine || s.engineStatus !== 'ready' || s.sweep.status === 'running') return;
+    const sw = s.sweep;
+    const def = sweepableParams(sw.modelId).find((p) => p.key === sw.key);
+    let job;
+    try {
+      job = buildSweepJob({
+        modelId: sw.modelId,
+        material: s.material,
+        material2: s.material2,
+        paramValues: sw.modelId !== 'Macrospin' ? s.paramValues[sw.modelId] : {},
+        macrospinValues: s.macrospinValues,
+        sweepKey: sw.key,
+        from: sw.from,
+        to: sw.to,
+        points: sw.points,
+        mode: sw.mode,
+        kFixed: sw.kFixed,
+        kRange:
+          sw.modelId !== 'Macrospin'
+            ? s.kRanges[sw.modelId]
+            : { min: 1, max: 2, points: 2, spacing: 'linear' },
+        quantityId: sw.quantityId,
+        modes: sw.modelId !== 'Macrospin' ? s.modes[sw.modelId] : [0],
+        nT: s.nT,
+        relax: sw.relax,
+      });
+    } catch (err) {
+      set((s2) => ({ sweep: { ...s2.sweep, error: errorMessage(err) } }));
+      return;
+    }
+    set((s2) => ({ sweep: { ...s2.sweep, status: 'running', error: null } }));
+    try {
+      const result = await engine.runSweep(job);
+      const meta: SweepMeta = {
+        job,
+        modelId: sw.modelId,
+        modelLabel: sw.modelId === 'Macrospin' ? 'Macrospin equilibrium' : getModel(sw.modelId).label,
+        key: sw.key,
+        paramLabel: def?.label ?? sw.key,
+        paramUnit: def?.unit ?? '',
+        paramToSI: def?.toSI ?? 1,
+        quantityId: sw.quantityId,
+        mode: sw.mode,
+        kFixed: sw.kFixed,
+        relax: sw.relax,
+        materialPresetId: get().materialPresetId,
+        materialPresetId2: job.material2 ? get().materialPresetId2 : undefined,
+        paramsDisplay:
+          sw.modelId === 'Macrospin'
+            ? describeGroup(MACROSPIN_PARAMS, get().macrospinValues)
+            : describeParams(sw.modelId, get().paramValues[sw.modelId]),
+        timestamp: new Date().toISOString(),
+      };
+      set((s2) => ({ sweep: { ...s2.sweep, status: 'idle', result, meta } }));
+    } catch (err) {
+      set((s2) => ({ sweep: { ...s2.sweep, status: 'idle', error: errorMessage(err) } }));
+    }
+  },
+
+  patchHyst: (patch) => set((s) => ({ hyst: { ...s.hyst, ...patch } })),
+
+  setHystType: (type) =>
+    set((s) => ({
+      hyst: { ...s.hyst, type, result: null, meta: null, error: null },
+      ...(type === 'double' ? { modelId: 'DoubleLayerNumeric' as ModelId } : {}),
+    })),
+
+  runHysteresis: async () => {
+    const s = get();
+    if (!engine || s.engineStatus !== 'ready' || s.hyst.status === 'running') return;
+    const h = s.hyst;
+    let job;
+    try {
+      job = buildHystJob({
+        type: h.type,
+        material: s.material,
+        material2: h.type === 'double' ? s.material2 : undefined,
+        macrospinValues: s.macrospinValues,
+        doubleLayerValues: s.paramValues.DoubleLayerNumeric,
+        Bmax: h.Bmax,
+        points: h.points,
+      });
+    } catch (err) {
+      set((s2) => ({ hyst: { ...s2.hyst, error: errorMessage(err) } }));
+      return;
+    }
+    set((s2) => ({ hyst: { ...s2.hyst, status: 'running', error: null } }));
+    try {
+      const result = await engine.runHysteresis(job);
+      const meta: HystMeta = {
+        job,
+        type: h.type,
+        Bmax: h.Bmax,
+        materialPresetId: get().materialPresetId,
+        materialPresetId2: h.type === 'double' ? get().materialPresetId2 : undefined,
+        paramsDisplay:
+          h.type === 'single'
+            ? describeGroup(MACROSPIN_PARAMS, get().macrospinValues)
+            : describeParams('DoubleLayerNumeric', get().paramValues.DoubleLayerNumeric),
+        timestamp: new Date().toISOString(),
+      };
+      set((s2) => ({ hyst: { ...s2.hyst, status: 'idle', result, meta } }));
+    } catch (err) {
+      set((s2) => ({ hyst: { ...s2.hyst, status: 'idle', error: errorMessage(err) } }));
+    }
+  },
 }));
 
 function normalizeResult(

@@ -4,7 +4,9 @@ Web interface for [SpinWaveToolkit](https://github.com/CEITECmagnonics/SpinWaveT
 
 ## Features
 
-- **All five SWT model classes**: `SingleLayer` (Kalinikos–Slavin), `SingleLayerNumeric` (Tacchi et al.), `DoubleLayerNumeric` (SAF, Gallardo et al.), `SingleLayerSCcoupled` (Zhou et al.), and `BulkPolariton`.
+- **All five SWT model classes**: `SingleLayer` (Kalinikos–Slavin), `SingleLayerNumeric` (Tacchi et al.), `DoubleLayerNumeric` (SAF, Gallardo et al.), `SingleLayerSCcoupled` (Zhou et al.), and `BulkPolariton` — plus `MacrospinEquilibrium` for static equilibria.
+- **Parameter sweeps** (`#/sweep`): sweep field, thickness, angles, coupling… of any model — quantities at a fixed k (k = 0 / FMR limit by default) or full dispersion maps over (k, parameter); the SAF equilibrium can be relaxed adiabatically between steps.
+- **Hysteresis loops** (`#/hysteresis`): full +B → −B → +B loops for a single layer (macrospin: Zeeman + demag + uniaxial anisotropies) or a SAF double layer (warm-started in-plane free-energy minimization); plots the M·B̂ projection or the equilibrium angles.
 - **Quantities**: dispersion relations, group velocity, lifetime, decay length, density of states, ellipticity, Bloch-function heatmaps, exchange length, parallel-pumping thresholds, SAF equilibrium angles…
 - **Materials**: NiFe, CoFeB, FeNi, YIG presets — every property editable, plus fully custom materials.
 - **Interactive graphing** (Plotly): overlay runs to compare parameter sweeps, per-trace colors/styles, log axes, unit switching (rad/µm, rad/m, wavelength), custom titles and labels.

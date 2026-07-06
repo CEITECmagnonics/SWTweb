@@ -14,13 +14,19 @@ export const STAGE_LABELS: Record<EngineStage, string> = {
   ready: 'Ready',
 };
 
+/** Bridge functions callable from the UI (whitelist). */
+export type BridgeFn = 'run_job' | 'run_sweep' | 'run_hysteresis';
+
 export type WorkerRequest =
   | { type: 'init' }
-  | { type: 'run'; id: number; job: ComputeJob };
+  | { type: 'run'; id: number; fn?: BridgeFn; job: object };
 
 export type WorkerResponse =
   | { type: 'status'; stage: EngineStage }
   | { type: 'ready'; swtVersion: string; pyodideVersion: string }
   | { type: 'init-error'; message: string }
-  | { type: 'result'; id: number; payload: BridgeResult }
+  | { type: 'result'; id: number; payload: unknown }
   | { type: 'error'; id: number; message: string };
+
+// Re-export for convenience of protocol consumers.
+export type { BridgeResult, ComputeJob };

@@ -4,8 +4,15 @@
  * Long-running jobs can be cancelled by terminating the worker; the engine
  * then boots a fresh worker so the app stays usable.
  */
-import type { BridgeResult, ComputeJob } from '../models/types';
-import type { EngineStage, WorkerRequest, WorkerResponse } from './protocol';
+import type {
+  BridgeResult,
+  ComputeJob,
+  HystJob,
+  HystResult,
+  SweepJob,
+  SweepResult,
+} from '../models/types';
+import type { BridgeFn, EngineStage, WorkerRequest, WorkerResponse } from './protocol';
 
 export interface EngineCallbacks {
   onStage: (stage: EngineStage) => void;
@@ -14,7 +21,7 @@ export interface EngineCallbacks {
 }
 
 interface PendingJob {
-  resolve: (r: BridgeResult) => void;
+  resolve: (r: never) => void;
   reject: (e: Error) => void;
 }
 
@@ -39,11 +46,23 @@ export class SwtEngine {
   }
 
   run(job: ComputeJob): Promise<BridgeResult> {
+    return this.call<BridgeResult>('run_job', job);
+  }
+
+  runSweep(job: SweepJob): Promise<SweepResult> {
+    return this.call<SweepResult>('run_sweep', job);
+  }
+
+  runHysteresis(job: HystJob): Promise<HystResult> {
+    return this.call<HystResult>('run_hysteresis', job);
+  }
+
+  private call<T>(fn: BridgeFn, job: object): Promise<T> {
     if (!this.worker) return Promise.reject(new Error('Engine not started.'));
     const id = this.nextId++;
-    return new Promise<BridgeResult>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.send({ type: 'run', id, job });
+    return new Promise<T>((resolve, reject) => {
+      this.pending.set(id, { resolve: resolve as (r: never) => void, reject });
+      this.send({ type: 'run', id, fn, job });
     });
   }
 
@@ -75,7 +94,7 @@ export class SwtEngine {
         this.callbacks.onInitError(msg.message);
         break;
       case 'result': {
-        this.pending.get(msg.id)?.resolve(msg.payload);
+        this.pending.get(msg.id)?.resolve(msg.payload as never);
         this.pending.delete(msg.id);
         break;
       }

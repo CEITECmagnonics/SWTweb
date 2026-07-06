@@ -31,7 +31,7 @@ function convertParam(def: ParamDef, value: number | string | null): number | st
   return num * def.toSI;
 }
 
-function convertGroup(defs: ParamDef[], values: ParamValues): Record<string, number | string> {
+export function convertGroup(defs: ParamDef[], values: ParamValues): Record<string, number | string> {
   const out: Record<string, number | string> = {};
   for (const def of defs) {
     // A key that was never set falls back to the default; an explicitly
@@ -97,6 +97,22 @@ export function buildJob(input: JobInput): ComputeJob {
     job.material2 = input.material2;
   }
   return job;
+}
+
+/** Human-readable summary of an arbitrary parameter group (display units). */
+export function describeGroup(defs: ParamDef[], values: ParamValues): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const def of defs) {
+    const v = def.key in values ? values[def.key] : def.default;
+    if (v === null || v === '') {
+      out[def.label] = def.nullLabel ?? 'default';
+    } else if (def.kind === 'choice') {
+      out[def.label] = String(def.choices?.find((c) => c.value === v)?.label ?? v);
+    } else {
+      out[def.label] = `${v}${def.unit ? ` ${def.unit}` : ''}`;
+    }
+  }
+  return out;
 }
 
 /** Human-readable parameter summary (display units) for provenance/exports. */

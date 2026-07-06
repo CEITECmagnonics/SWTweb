@@ -222,6 +222,9 @@ node_modules/
 *.local
 *.tsbuildinfo
 
+# Local Claude Code session config (machine-specific paths)
+.claude/
+
 # Vendored Python wheels for Pyodide must be committed
 # (the template's `wheels/` rule above would otherwise exclude them)
 !public/wheels/

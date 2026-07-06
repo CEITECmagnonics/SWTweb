@@ -163,6 +163,74 @@ export interface ComputeJob {
   }>;
 }
 
+export type SweepModelId = ModelId | 'Macrospin';
+
+/** Job spec for run_sweep (all values SI). */
+export interface SweepJob {
+  model: SweepModelId;
+  /** SWT models */
+  material?: MaterialValues;
+  material2?: MaterialValues;
+  params?: Record<string, number | string | Matrix3>;
+  methodKwargs?: Record<string, number | string | Matrix3>;
+  quantities?: ComputeJob['quantities'];
+  modes?: number[];
+  nT?: number;
+  /** Macrospin config (SI) */
+  config?: Record<string, number | string>;
+  sweep: { key: string; values: number[] };
+  mode: 'fixedK' | 'map';
+  /** SI rad/m, fixed-k mode */
+  kFixed?: number;
+  /** map mode */
+  kRange?: KRange;
+  /** DoubleLayerNumeric: warm-start phiInit from the previous sweep step */
+  relax?: boolean;
+}
+
+/** run_sweep result (SI values; x = swept parameter for traces, k for grids). */
+export interface SweepResult {
+  traces: Array<{ quantity: string; label: string; x: number[]; y: (number | null)[] }>;
+  grids: Array<{
+    quantity: string;
+    label: string;
+    /** k (rad/m) */
+    x: number[];
+    /** swept parameter (SI) */
+    y: number[];
+    z: (number | null)[][];
+  }>;
+}
+
+/** Job spec for run_hysteresis (SI). */
+export interface HystJob {
+  type: 'single' | 'double';
+  /** Macrospin config for the single layer (SI, Bext overridden by the loop) */
+  config?: Record<string, number | string>;
+  /** DoubleLayerNumeric inputs */
+  material?: MaterialValues;
+  material2?: MaterialValues;
+  params?: Record<string, number | string | Matrix3>;
+  /** T */
+  Bmax: number;
+  /** points per branch */
+  points: number;
+}
+
+/** run_hysteresis result: two branches (down: +B→−B, up: −B→+B), angles in rad. */
+export interface HystResult {
+  type: 'single' | 'double';
+  branches: Array<{
+    label: 'down' | 'up';
+    B: number[];
+    proj: (number | null)[];
+    /** single: θ_M; double: φ₁ */
+    a1: (number | null)[];
+    /** single: φ_M; double: φ₂ */
+    a2: (number | null)[];
+  }>;
+}
+
 /** Normalized results returned by swt_bridge.py (values SI, NaN → null). */
 export interface BridgeResult {
   traces: Array<{ quantity: string; label: string; x: number[]; y: (number | null)[] }>;

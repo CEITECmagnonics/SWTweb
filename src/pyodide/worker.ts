@@ -25,8 +25,10 @@ interface PyodideLike {
 
 const post = (msg: WorkerResponse) => self.postMessage(msg);
 
+const BRIDGE_FNS = ['run_job', 'run_sweep', 'run_hysteresis'] as const;
+
 let pyodide: PyodideLike | null = null;
-let runJob: ((jobJson: string) => string) | null = null;
+let bridge: Record<string, (jobJson: string) => string> | null = null;
 
 async function init(): Promise<void> {
   post({ type: 'status', stage: 'loading-pyodide' });
@@ -49,7 +51,10 @@ await micropip.install(
 `);
 
   pyodide.runPython(bridgeSource);
-  runJob = pyodide.globals.get('run_job') as (jobJson: string) => string;
+  bridge = {};
+  for (const fn of BRIDGE_FNS) {
+    bridge[fn] = pyodide.globals.get(fn) as (jobJson: string) => string;
+  }
   const getVersion = pyodide.globals.get('get_version') as () => string;
 
   post({
@@ -70,12 +75,14 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     return;
   }
   if (msg.type === 'run') {
-    if (!runJob) {
+    const fnName = msg.fn ?? 'run_job';
+    const fn = bridge?.[fnName];
+    if (!fn) {
       post({ type: 'error', id: msg.id, message: 'Engine is not ready yet.' });
       return;
     }
     try {
-      const resultJson = runJob(JSON.stringify(msg.job));
+      const resultJson = fn(JSON.stringify(msg.job));
       post({ type: 'result', id: msg.id, payload: JSON.parse(resultJson) });
     } catch (err) {
       post({ type: 'error', id: msg.id, message: err instanceof Error ? err.message : String(err) });

@@ -1,12 +1,52 @@
 import { useEffect } from 'react';
 import { SWT_CITATION } from './models/citation';
 import { EngineStatusBanner } from './components/LoadingOverlay';
+import { HysteresisPage } from './components/HysteresisPage';
 import { PlotCustomization } from './components/PlotCustomization';
 import { PlotPanel } from './components/PlotPanel';
 import { Sidebar } from './components/Sidebar';
+import { SweepPage } from './components/SweepPage';
 import { TraceList } from './components/TraceList';
-import { useStore } from './state/store';
+import { pageFromHash, useStore, type PageId } from './state/store';
 import swtLogoUrl from './assets/spinwavetoolkit-logo-text.svg';
+
+const PAGES: Array<{ id: PageId; label: string; title: string }> = [
+  { id: 'dispersion', label: 'Dispersion', title: 'Spin-wave characteristics vs wavenumber k' },
+  {
+    id: 'sweep',
+    label: 'Parameter sweep',
+    title: 'Sweep field, thickness, angles… at fixed k or as a full dispersion map',
+  },
+  {
+    id: 'hysteresis',
+    label: 'Hysteresis',
+    title: 'Hysteresis loops of a single layer (macrospin) or a SAF double layer',
+  },
+];
+
+function PageNav() {
+  const page = useStore((s) => s.page);
+  const setPage = useStore((s) => s.setPage);
+  return (
+    <nav className="flex gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+      {PAGES.map((p) => (
+        <button
+          key={p.id}
+          type="button"
+          title={p.title}
+          onClick={() => setPage(p.id)}
+          className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+            page === p.id
+              ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-900 dark:text-white'
+              : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+          }`}
+        >
+          {p.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
 
 function Header() {
   const theme = useStore((s) => s.theme);
@@ -38,6 +78,7 @@ function Header() {
           </span>
         )}
       </div>
+      <PageNav />
       <div className="flex items-center gap-2">
         <a
           href="https://ceitecmagnonics.github.io/SpinWaveToolkit/stable/"
@@ -71,6 +112,8 @@ function Header() {
 export default function App() {
   const initEngine = useStore((s) => s.initEngine);
   const theme = useStore((s) => s.theme);
+  const page = useStore((s) => s.page);
+  const setPage = useStore((s) => s.setPage);
 
   useEffect(() => {
     initEngine();
@@ -79,6 +122,22 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
+
+  useEffect(() => {
+    const onHash = () => setPage(pageFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [setPage]);
+
+  if (page !== 'dispersion') {
+    return (
+      <div className="flex h-full flex-col">
+        <Header />
+        <EngineStatusBanner />
+        {page === 'sweep' ? <SweepPage /> : <HysteresisPage />}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
