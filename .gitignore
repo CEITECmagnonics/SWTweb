@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node / frontend
+node_modules/
+*.local
+*.tsbuildinfo
+
+# Vendored Python wheels for Pyodide must be committed
+# (the template's `wheels/` rule above would otherwise exclude them)
+!public/wheels/
+!public/wheels/*.whl
