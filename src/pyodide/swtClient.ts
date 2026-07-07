@@ -5,6 +5,8 @@
  * then boots a fresh worker so the app stays usable.
  */
 import type {
+  BlsJob,
+  BlsResult,
   BridgeResult,
   ComputeJob,
   HystJob,
@@ -55,6 +57,10 @@ export class SwtEngine {
 
   runHysteresis(job: HystJob): Promise<HystResult> {
     return this.call<HystResult>('run_hysteresis', job);
+  }
+
+  runBls(job: BlsJob): Promise<BlsResult> {
+    return this.call<BlsResult>('run_bls', job);
   }
 
   private call<T>(fn: BridgeFn, job: object): Promise<T> {

@@ -15,7 +15,7 @@ export const STAGE_LABELS: Record<EngineStage, string> = {
 };
 
 /** Bridge functions callable from the UI (whitelist). */
-export type BridgeFn = 'run_job' | 'run_sweep' | 'run_hysteresis';
+export type BridgeFn = 'run_job' | 'run_sweep' | 'run_hysteresis' | 'run_bls';
 
 export type WorkerRequest =
   | { type: 'init' }

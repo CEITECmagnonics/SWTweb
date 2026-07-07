@@ -11,6 +11,25 @@ import json
 import math
 
 import numpy as np
+
+# --- SciPy >= 1.14 compatibility shim -------------------------------------
+# SpinWaveToolkit 1.3.0 calls scipy.integrate.simpson(y, x) positionally,
+# which newer SciPy (as shipped by Pyodide) rejects (x became keyword-only).
+# Patch before SWT imports `simpson` into its own namespace.
+import scipy.integrate as _scipy_integrate
+
+_orig_simpson = _scipy_integrate.simpson
+
+
+def _simpson_compat(y, x=None, *args, **kwargs):
+    if x is not None:
+        kwargs.setdefault("x", x)
+    return _orig_simpson(y, *args, **kwargs)
+
+
+_scipy_integrate.simpson = _simpson_compat
+# ---------------------------------------------------------------------------
+
 import SpinWaveToolkit as SWT
 
 
@@ -446,6 +465,302 @@ def run_hysteresis(job_json):
             }
         )
     return json.dumps({"type": "double", "branches": branches})
+
+
+# ---------------------------------------------------------------------------
+# Micro-focused BLS (SpinWaveToolkit.bls submodule)
+# Model: Wojewoda et al., Phys. Rev. B 110, 224428 (2024).
+# ---------------------------------------------------------------------------
+
+def _bls_focal(optics):
+    """Incident focal field of the objective lens (Richards-Wolf)."""
+    lens = SWT.bls.ObjectiveLens(
+        NA=optics["NA"],
+        wavelength=optics["wavelength"],
+        f0=optics.get("f0", 10),
+        f=optics.get("focalLength", 1e-3),
+    )
+    x, y, ex, ey, ez = lens.getFocalField(
+        z=0, rho_max=optics.get("rhoMax", 10e-6), N=int(optics.get("focalN", 201))
+    )
+    return [x, y], [ex, ey, ez]
+
+
+def _bls_stack(cfg):
+    """Dielectric stack: superstrate / [cover] / magnetic layer / substrate.
+
+    Returns (DF, PM, thicknesses, source_layer_index).
+    """
+    eps_mag = complex(cfg["epsMagRe"], cfg["epsMagIm"])
+    eps_sub = complex(cfg["epsSubRe"], cfg["epsSubIm"])
+    if cfg.get("coverEnabled"):
+        eps_cov = complex(cfg["epsCoverRe"], cfg["epsCoverIm"])
+        df = [1.0, eps_cov, eps_mag, eps_sub]
+        thicknesses = [cfg["dCover"], cfg["d"]]
+        source = 2
+    else:
+        df = [1.0, eps_mag, eps_sub]
+        thicknesses = [cfg["d"]]
+        source = 1
+    return df, [1.0] * len(df), thicknesses, source
+
+
+def _bls_thermal_bloch(cfg, w_common, kx, ky):
+    """Vectorial thermal Bloch function (3, Nf, Nkx, Nky) from SingleLayer.
+
+    Composition [B, 0, iB] follows the official SWT BLS example.
+    """
+    nf = len(w_common)
+    nk = len(kx)
+    kx_safe = kx.copy()
+    kx_safe[np.abs(kx_safe) < 1e-6] = 1e-6
+    KX, KY = np.meshgrid(kx_safe, ky, indexing="ij")
+    K = np.hypot(KX, KY)
+    PHI = np.arctan2(KY, KX)
+    model = SWT.SingleLayer(
+        Bext=cfg["Bext"],
+        kxi=K.flatten(),
+        theta=cfg.get("theta", np.pi / 2),
+        phi=PHI.flatten(),
+        d=cfg["d"],
+        material=_make_material(cfg["material"]),
+    )
+    b2 = np.zeros((nf, nk, nk), dtype=complex)
+    for n in range(int(cfg.get("nModes", 2))):
+        w, bf = model.GetBlochFunction(
+            n=n, Nf=nf, temp=cfg.get("temp", 300), mu=-1e12 * SWT.H
+        )
+        bf = bf.reshape(nf, nk, nk)
+        for i in range(nk):
+            for j in range(nk):
+                b2[:, i, j] += np.interp(w_common, w, bf[:, i, j], left=0, right=0)
+    return np.array([b2, np.zeros_like(b2), 1j * b2])
+
+
+def _bls_auto_frange(cfg, kmax, optics):
+    """Frequency window covering modes n = 0..nModes-1 over the *detectable*
+    k range (~1.5 k0 NA). Magnons far beyond the NA edge are invisible to
+    µBLS and extending the window to them only amplifies numerical leakage."""
+    k_det = 1.5 * (2 * np.pi / optics["wavelength"]) * optics["NA"]
+    model = SWT.SingleLayer(
+        Bext=cfg["Bext"],
+        kxi=np.linspace(1.0, min(kmax, k_det), 40),
+        theta=cfg.get("theta", np.pi / 2),
+        phi=np.pi / 2,
+        d=cfg["d"],
+        material=_make_material(cfg["material"]),
+    )
+    fmin, fmax = np.inf, 0.0
+    for n in range(int(cfg.get("nModes", 2))):
+        for phi in (0.0, np.pi / 2):
+            model.phi = phi
+            w = np.real(model.GetDispersion(n=n))
+            fmin = min(fmin, float(np.nanmin(w)))
+            fmax = max(fmax, float(np.nanmax(w)))
+    return 0.85 * fmin, 1.1 * fmax
+
+
+def _bls_thermal_sigma(cfg, optics, exy, e_field):
+    """One thermal µBLS spectrum; returns (w_common, |sigma|)."""
+    kmax = cfg["kMax"]
+    nk = int(cfg.get("nK", 64))
+    nf = int(cfg.get("nF", 61))
+    if cfg.get("fAuto", True):
+        wmin, wmax = _bls_auto_frange(cfg, kmax, optics)
+    else:
+        wmin = cfg["fMin"] * 2 * np.pi
+        wmax = cfg["fMax"] * 2 * np.pi
+    w_common = np.linspace(wmin, wmax, nf)
+    kx = np.linspace(-kmax, kmax, nk)
+    ky = kx.copy()
+    bloch = _bls_thermal_bloch(cfg, w_common, kx, ky)
+    df, pm, thicknesses, source = _bls_stack(cfg)
+    sigma = SWT.bls.get_signal_GF_focal(
+        SweepBloch=w_common,
+        KxKyBloch=[kx, ky],
+        Bloch=bloch,
+        Exy=exy,
+        E=e_field,
+        DF=df,
+        PM=pm,
+        d=thicknesses,
+        NA=optics["NA"],
+        Nq=int(cfg.get("nQ", 30)),
+        source_layer_index=source,
+        wavelength=optics["wavelength"],
+    )
+    return w_common, np.abs(np.asarray(sigma, dtype=complex))
+
+
+def _bls_apply_sweep(cfg, optics, key, value):
+    """Apply one swept value to the BLS config/optics dicts."""
+    if key in ("NA", "wavelength"):
+        optics[key] = value
+    else:
+        cfg[key] = value
+
+
+def run_bls(job_json):
+    """Micro-focused BLS calculations: thermal spectra (opt. swept) and
+    coherent k-sensitivity."""
+    job = json.loads(job_json)
+    task = job["task"]
+    cfg = dict(job["config"])
+    optics = dict(job["optics"])
+
+    if task == "thermal":
+        sweep = job.get("sweep")
+        if not sweep:
+            exy, e_field = _bls_focal(optics)
+            w, sig = _bls_thermal_sigma(cfg, optics, exy, e_field)
+            return json.dumps(
+                {
+                    "traces": [
+                        {
+                            "quantity": "blsSpectrum",
+                            "label": "",
+                            "x": _clean_1d(w),
+                            "y": _clean_1d(sig),
+                        }
+                    ],
+                    "grids": [],
+                }
+            )
+        # Swept thermal spectra -> heatmap over (frequency, parameter).
+        key = sweep["key"]
+        values = [float(v) for v in sweep["values"]]
+        optics_swept = key in ("NA", "wavelength")
+        exy, e_field = (None, None)
+        if not optics_swept:
+            exy, e_field = _bls_focal(optics)
+        # Common frequency axis across the sweep: fix the window from the
+        # extreme parameter values so all spectra share one grid.
+        rows = []
+        w_axis = None
+        for v in values:
+            c = dict(cfg)
+            o = dict(optics)
+            _bls_apply_sweep(c, o, key, v)
+            if w_axis is None:
+                if c.get("fAuto", True):
+                    # widest window over the sweep: probe both ends
+                    c_lo, o_lo = dict(cfg), dict(optics)
+                    _bls_apply_sweep(c_lo, o_lo, key, values[0])
+                    c_hi, o_hi = dict(cfg), dict(optics)
+                    _bls_apply_sweep(c_hi, o_hi, key, values[-1])
+                    lo1, hi1 = _bls_auto_frange(c_lo, c_lo["kMax"], o_lo)
+                    lo2, hi2 = _bls_auto_frange(c_hi, c_hi["kMax"], o_hi)
+                    w_axis = (min(lo1, lo2), max(hi1, hi2))
+                else:
+                    w_axis = (c["fMin"] * 2 * np.pi, c["fMax"] * 2 * np.pi)
+            c["fAuto"] = False
+            c["fMin"] = w_axis[0] / (2 * np.pi)
+            c["fMax"] = w_axis[1] / (2 * np.pi)
+            if optics_swept:
+                exy, e_field = _bls_focal(o)
+            w, sig = _bls_thermal_sigma(c, o, exy, e_field)
+            rows.append(_clean_1d(sig))
+        w = np.linspace(w_axis[0], w_axis[1], int(cfg.get("nF", 61)))
+        return json.dumps(
+            {
+                "traces": [],
+                "grids": [
+                    {
+                        "quantity": "blsSpectrum",
+                        "label": "",
+                        "x": _clean_1d(w),
+                        "y": values,
+                        "z": rows,
+                    }
+                ],
+            }
+        )
+
+    if task == "sensitivity":
+        # Detection sensitivity for coherently excited spin waves at
+        # kx = k, ky = 0 (delta Bloch on the grid, Eq. (28) of the paper).
+        exy, e_field = _bls_focal(optics)
+        kmax = cfg["kMax"]
+        npts = int(cfg.get("kPoints", 40))
+        dk = kmax / npts
+        half = int(np.ceil(npts * 1.25))
+        kx = np.arange(-half, half + 1) * dk
+        ky = kx.copy()
+        iy0 = int(np.argmin(np.abs(ky)))
+        df, pm, thicknesses, source = _bls_stack(cfg)
+        material = _make_material(cfg["material"])
+        ks, sens, freqs = [], [], []
+        for ix in range(len(kx)):
+            kv = kx[ix]
+            if kv < dk / 2 or kv > kmax + dk / 2:
+                continue
+            model = SWT.SingleLayer(
+                Bext=cfg["Bext"],
+                kxi=np.array([max(kv, 1e-6)]),
+                theta=cfg.get("theta", np.pi / 2),
+                phi=cfg.get("phi", np.pi / 2),
+                d=cfg["d"],
+                material=material,
+            )
+            w0 = float(np.real(model.GetDispersion(n=0)[0]))
+            b2 = np.zeros((1, len(kx), len(ky)), dtype=complex)
+            b2[0, ix, iy0] = 1.0
+            bloch = np.array([b2, np.zeros_like(b2), 1j * b2])
+            sigma = SWT.bls.get_signal_GF_focal(
+                SweepBloch=np.array([w0]),
+                KxKyBloch=[kx, ky],
+                Bloch=bloch,
+                Exy=exy,
+                E=e_field,
+                DF=df,
+                PM=pm,
+                d=thicknesses,
+                NA=optics["NA"],
+                Nq=int(cfg.get("nQ", 30)),
+                source_layer_index=source,
+                wavelength=optics["wavelength"],
+                coherent_exc=True,
+            )
+            ks.append(float(kv))
+            freqs.append(w0)
+            sens.append(float(np.abs(np.asarray(sigma, dtype=complex)).ravel()[0]))
+        sens = np.asarray(sens)
+        peak = float(np.max(sens)) if len(sens) else 1.0
+        if peak > 0:
+            sens = sens / peak
+        # Detection edges (largest k where sensitivity is still above level).
+        scalars = []
+        for level, qid in ((0.1, "edge10"), (0.01, "edge1")):
+            above = [k for k, s in zip(ks, sens) if s >= level]
+            scalars.append(
+                {
+                    "quantity": qid,
+                    "index": 0,
+                    "value": float(max(above)) if above else None,
+                }
+            )
+        return json.dumps(
+            {
+                "traces": [
+                    {
+                        "quantity": "kSensitivity",
+                        "label": "",
+                        "x": ks,
+                        "y": _clean_1d(sens),
+                    },
+                    {
+                        "quantity": "kSensFreq",
+                        "label": "",
+                        "x": ks,
+                        "y": _clean_1d(freqs),
+                    },
+                ],
+                "grids": [],
+                "scalars": scalars,
+            }
+        )
+
+    raise ValueError(f"Unknown BLS task: {task}")
 
 
 def get_version():

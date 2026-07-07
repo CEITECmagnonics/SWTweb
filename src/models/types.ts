@@ -231,6 +231,29 @@ export interface HystResult {
   }>;
 }
 
+/** Job spec for run_bls (SI). */
+export interface BlsJob {
+  task: 'thermal' | 'sensitivity';
+  config: Record<string, number | string | MaterialValues>;
+  optics: Record<string, number>;
+  sweep?: { key: string; values: number[] };
+}
+
+/** run_bls result (SI; thermal → trace or grid, sensitivity → traces + edges). */
+export interface BlsResult {
+  traces: Array<{ quantity: string; label: string; x: number[]; y: (number | null)[] }>;
+  grids: Array<{
+    quantity: string;
+    label: string;
+    /** rad·Hz frequency axis */
+    x: number[];
+    /** swept parameter (SI) */
+    y: number[];
+    z: (number | null)[][];
+  }>;
+  scalars?: Array<{ quantity: string; index: number; value: number | null }>;
+}
+
 /** Normalized results returned by swt_bridge.py (values SI, NaN → null). */
 export interface BridgeResult {
   traces: Array<{ quantity: string; label: string; x: number[]; y: (number | null)[] }>;

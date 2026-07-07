@@ -25,7 +25,7 @@ interface PyodideLike {
 
 const post = (msg: WorkerResponse) => self.postMessage(msg);
 
-const BRIDGE_FNS = ['run_job', 'run_sweep', 'run_hysteresis'] as const;
+const BRIDGE_FNS = ['run_job', 'run_sweep', 'run_hysteresis', 'run_bls'] as const;
 
 let pyodide: PyodideLike | null = null;
 let bridge: Record<string, (jobJson: string) => string> | null = null;

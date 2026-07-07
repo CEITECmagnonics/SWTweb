@@ -1,11 +1,15 @@
 /** Central application state (zustand). */
 import { create } from 'zustand';
+import { BLS_ALL_PARAMS, blsSweepableParams, type BlsMode } from '../models/bls';
+import { blsDefaultSweepRange, buildBlsJob } from '../models/blsJob';
 import { buildJob, describeGroup, describeParams, type ParamValues } from '../models/job';
 import { MACROSPIN_PARAMS } from '../models/macrospin';
 import { getModel, MODELS } from '../models/registry';
 import { buildHystJob, buildSweepJob, defaultSweepRange, sweepableParams } from '../models/sweep';
 import { singleLayerTensorDefaults } from '../models/tensors';
 import type {
+  BlsJob,
+  BlsResult,
   BridgeResult,
   ComputeJob,
   HystResult,
@@ -105,7 +109,33 @@ export interface PlotSettings {
 
 export type EngineStatus = 'boot' | 'loading' | 'ready' | 'computing' | 'error';
 
-export type PageId = 'dispersion' | 'sweep' | 'hysteresis';
+export type PageId = 'dispersion' | 'sweep' | 'hysteresis' | 'bls';
+
+export interface BlsMeta {
+  job: BlsJob;
+  mode: BlsMode;
+  sweepKey?: string;
+  paramLabel?: string;
+  paramUnit?: string;
+  paramToSI?: number;
+  materialPresetId: string;
+  paramsDisplay: Record<string, string>;
+  timestamp: string;
+}
+
+export interface BlsState {
+  mode: BlsMode;
+  values: ParamValues;
+  sweepEnabled: boolean;
+  sweepKey: string;
+  sweepFrom: number;
+  sweepTo: number;
+  sweepPoints: number;
+  status: 'idle' | 'running';
+  error: string | null;
+  result: BlsResult | null;
+  meta: BlsMeta | null;
+}
 
 export interface SweepMeta {
   /** The exact job that produced the result (SI) — used for notebook export. */
@@ -179,6 +209,7 @@ interface AppState {
   macrospinValues: ParamValues;
   sweep: SweepState;
   hyst: HystState;
+  bls: BlsState;
 
   modelId: ModelId;
   materialPresetId: string;
@@ -228,6 +259,10 @@ interface AppState {
   patchHyst: (patch: Partial<HystState>) => void;
   setHystType: (type: 'single' | 'double') => void;
   runHysteresis: () => Promise<void>;
+  patchBls: (patch: Partial<BlsState>) => void;
+  setBlsValue: (key: string, value: number | string | null) => void;
+  setBlsSweepKey: (key: string) => void;
+  runBls: () => Promise<void>;
 }
 
 function defaultParamValues(modelId: ModelId): ParamValues {
@@ -273,7 +308,26 @@ export function pageFromHash(): PageId {
   const h = window.location.hash;
   if (h.startsWith('#/sweep')) return 'sweep';
   if (h.startsWith('#/hysteresis')) return 'hysteresis';
+  if (h.startsWith('#/bls')) return 'bls';
   return 'dispersion';
+}
+
+function initialBlsState(): BlsState {
+  const bext = blsSweepableParams().find((p) => p.key === 'Bext')!;
+  const range = blsDefaultSweepRange(bext);
+  return {
+    mode: 'thermal',
+    values: Object.fromEntries(BLS_ALL_PARAMS.map((p) => [p.key, p.default])) as ParamValues,
+    sweepEnabled: false,
+    sweepKey: 'Bext',
+    sweepFrom: range.from,
+    sweepTo: range.to,
+    sweepPoints: range.points,
+    status: 'idle',
+    error: null,
+    result: null,
+    meta: null,
+  };
 }
 
 const initialMacrospinValues = Object.fromEntries(
@@ -323,6 +377,7 @@ export const useStore = create<AppState>((set, get) => ({
     result: null,
     meta: null,
   },
+  bls: initialBlsState(),
 
   modelId: 'SingleLayer',
   materialPresetId: 'NiFe',
@@ -655,6 +710,73 @@ export const useStore = create<AppState>((set, get) => ({
       set((s2) => ({ hyst: { ...s2.hyst, status: 'idle', result, meta } }));
     } catch (err) {
       set((s2) => ({ hyst: { ...s2.hyst, status: 'idle', error: errorMessage(err) } }));
+    }
+  },
+
+  patchBls: (patch) => set((s) => ({ bls: { ...s.bls, ...patch } })),
+
+  setBlsValue: (key, value) =>
+    set((s) => ({ bls: { ...s.bls, values: { ...s.bls.values, [key]: value } } })),
+
+  setBlsSweepKey: (key) =>
+    set((s) => {
+      const def = blsSweepableParams().find((p) => p.key === key);
+      const range = def ? blsDefaultSweepRange(def) : {};
+      return {
+        bls: {
+          ...s.bls,
+          sweepKey: key,
+          ...(def
+            ? {
+                sweepFrom: (range as { from: number }).from,
+                sweepTo: (range as { to: number }).to,
+                sweepPoints: (range as { points: number }).points,
+              }
+            : {}),
+        },
+      };
+    }),
+
+  runBls: async () => {
+    const s = get();
+    if (!engine || s.engineStatus !== 'ready' || s.bls.status === 'running') return;
+    const b = s.bls;
+    let job: BlsJob;
+    try {
+      job = buildBlsJob({
+        mode: b.mode,
+        material: s.material,
+        values: b.values,
+        sweepEnabled: b.mode === 'thermal' && b.sweepEnabled,
+        sweepKey: b.sweepKey,
+        sweepFrom: b.sweepFrom,
+        sweepTo: b.sweepTo,
+        sweepPoints: b.sweepPoints,
+      });
+    } catch (err) {
+      set((s2) => ({ bls: { ...s2.bls, error: errorMessage(err) } }));
+      return;
+    }
+    set((s2) => ({ bls: { ...s2.bls, status: 'running', error: null } }));
+    try {
+      const result = await engine.runBls(job);
+      const sweepDef = job.sweep
+        ? blsSweepableParams().find((p) => p.key === job.sweep!.key)
+        : undefined;
+      const meta: BlsMeta = {
+        job,
+        mode: b.mode,
+        sweepKey: job.sweep?.key,
+        paramLabel: sweepDef?.label,
+        paramUnit: sweepDef?.unit,
+        paramToSI: sweepDef?.toSI,
+        materialPresetId: get().materialPresetId,
+        paramsDisplay: describeGroup(BLS_ALL_PARAMS, get().bls.values),
+        timestamp: new Date().toISOString(),
+      };
+      set((s2) => ({ bls: { ...s2.bls, status: 'idle', result, meta } }));
+    } catch (err) {
+      set((s2) => ({ bls: { ...s2.bls, status: 'idle', error: errorMessage(err) } }));
     }
   },
 }));

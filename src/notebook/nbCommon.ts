@@ -67,7 +67,7 @@ export function isMatrix3(value: unknown): value is Matrix3 {
   );
 }
 
-/** Format a JS value as a Python literal. */
+/** Format a JS value as a Python literal (unit-conversion float noise removed). */
 export function py(value: number | string | Matrix3 | null): string {
   if (value === null) return 'None';
   if (isMatrix3(value)) {
@@ -75,7 +75,8 @@ export function py(value: number | string | Matrix3 | null): string {
   }
   if (value === 'inf') return 'np.inf';
   if (typeof value === 'string') return `"${value}"`;
-  return String(value);
+  if (value === 0) return '0';
+  return String(Number(value.toPrecision(12)));
 }
 
 export function pyKwargs(obj: Record<string, number | string | Matrix3> | undefined): string {

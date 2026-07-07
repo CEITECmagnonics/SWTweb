@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { SWT_CITATION } from './models/citation';
+import { BlsPage } from './components/BlsPage';
 import { EngineStatusBanner } from './components/LoadingOverlay';
 import { HysteresisPage } from './components/HysteresisPage';
 import { PlotCustomization } from './components/PlotCustomization';
@@ -21,6 +22,11 @@ const PAGES: Array<{ id: PageId; label: string; title: string }> = [
     id: 'hysteresis',
     label: 'Hysteresis',
     title: 'Hysteresis loops of a single layer (macrospin) or a SAF double layer',
+  },
+  {
+    id: 'bls',
+    label: 'µBLS',
+    title: 'Micro-focused Brillouin light scattering: thermal spectra and k-sensitivity',
   },
 ];
 
@@ -134,7 +140,7 @@ export default function App() {
       <div className="flex h-full flex-col">
         <Header />
         <EngineStatusBanner />
-        {page === 'sweep' ? <SweepPage /> : <HysteresisPage />}
+        {page === 'sweep' ? <SweepPage /> : page === 'hysteresis' ? <HysteresisPage /> : <BlsPage />}
       </div>
     );
   }
