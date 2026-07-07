@@ -187,12 +187,18 @@ function sensitivityCells(nb: NotebookBuilder, input: BlsNotebookInput): void {
   nb.code(focalCell(job));
   nb.code(stackCells(job));
   nb.code(`# Detection sensitivity for coherently excited spin waves (Eq. (28)):
-# a delta Bloch function at (kx = k, ky = 0) at its dispersion frequency,
-# summed coherently (amplitudes first, intensity after).
+# a delta Bloch function propagating along the beam polarization axis,
+# at its dispersion frequency, summed coherently (amplitudes first,
+# intensity after).
+# NOTE: the delta goes on the SECOND Bloch axis — get_signal_GF_focal
+# interpolates the focal-field FFT with its axes transposed relative to
+# the Bloch array (same convention as the original MATLAB reference,
+# GetBLSsignalCoherent.m: M(Ind0, Ind)). The library q-grid spans
+# ±1.1·k0, so k is capped there.
 NA_current = ${py(job.optics.NA)}
 wavelength_current = ${py(job.optics.wavelength)}
 Nq = ${py(num(c.nQ, 28))}
-k_max = ${py(num(c.kMax, 20e6))}  # rad/m
+k_max = min(${py(num(c.kMax, 20e6))}, 1.05 * 2 * np.pi / wavelength_current)  # rad/m
 n_points = ${py(num(c.kPoints, 40))}
 dk = k_max / n_points
 half = int(np.ceil(n_points * 1.25))
@@ -209,8 +215,8 @@ for ix, kv in enumerate(kx_grid):
                             material=material)
     w0 = float(np.real(model.GetDispersion(n=0)[0]))
     B2 = np.zeros((1, len(kx_grid), len(ky_grid)), dtype=complex)
-    B2[0, ix, iy0] = 1.0
-    Bloch3 = np.array([B2, np.zeros_like(B2), 1j * B2])
+    B2[0, iy0, ix] = 1.0  # delta on the second axis (see note above)
+    Bloch3 = np.array([B2, np.zeros_like(B2), -1j * B2])  # Mz = -i*Mx
     sigma = SWT.bls.get_signal_GF_focal(
         SweepBloch=np.array([w0]), KxKyBloch=[kx_grid, ky_grid], Bloch=Bloch3,
         Exy=Exy, E=E, DF=DF, PM=PM, d=thicknesses, NA=NA_current,

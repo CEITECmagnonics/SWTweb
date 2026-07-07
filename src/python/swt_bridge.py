@@ -677,10 +677,17 @@ def run_bls(job_json):
         )
 
     if task == "sensitivity":
-        # Detection sensitivity for coherently excited spin waves at
-        # kx = k, ky = 0 (delta Bloch on the grid, Eq. (28) of the paper).
+        # Detection sensitivity for coherently excited spin waves: a delta
+        # Bloch function propagating along the beam polarization axis
+        # (Eq. (28) of the paper). NOTE the delta goes on the SECOND Bloch
+        # axis: get_signal_GF_focal interpolates the focal-field FFT with
+        # its axes transposed relative to the Bloch array (same convention
+        # as the original MATLAB GetBLSsignalCoherent.m, `M(Ind0, Ind)`).
         exy, e_field = _bls_focal(optics)
-        kmax = cfg["kMax"]
+        # The library's internal q-grid spans ±1.1·k0; magnons beyond it
+        # cannot be represented, so cap the sweep there.
+        k0 = 2 * np.pi / optics["wavelength"]
+        kmax = min(cfg["kMax"], 1.05 * k0)
         npts = int(cfg.get("kPoints", 40))
         dk = kmax / npts
         half = int(np.ceil(npts * 1.25))
@@ -704,8 +711,10 @@ def run_bls(job_json):
             )
             w0 = float(np.real(model.GetDispersion(n=0)[0]))
             b2 = np.zeros((1, len(kx), len(ky)), dtype=complex)
-            b2[0, ix, iy0] = 1.0
-            bloch = np.array([b2, np.zeros_like(b2), 1j * b2])
+            # delta on the second axis (see note above); Mz = -i*Mx as in
+            # the reference MATLAB implementation
+            b2[0, iy0, ix] = 1.0
+            bloch = np.array([b2, np.zeros_like(b2), -1j * b2])
             sigma = SWT.bls.get_signal_GF_focal(
                 SweepBloch=np.array([w0]),
                 KxKyBloch=[kx, ky],

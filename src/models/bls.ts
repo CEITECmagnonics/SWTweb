@@ -307,10 +307,11 @@ export const BLS_SENS_PARAMS: ParamDef[] = [
     label: 'k max',
     unit: 'rad/µm',
     toSI: 1e6,
-    default: 20,
+    default: 12,
     min: 1,
     kind: 'number',
-    tooltip: 'Largest spin-wave wavenumber of the sensitivity sweep.',
+    tooltip:
+      'Largest spin-wave wavenumber of the sensitivity sweep. Capped at ≈1.05·k₀ (~12 rad/µm at 532 nm) — the q-grid extent of the library.',
   },
   {
     key: 'kPoints',
