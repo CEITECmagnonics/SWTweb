@@ -26,7 +26,7 @@ const PAGES: Array<{ id: PageId; label: string; title: string }> = [
   {
     id: 'bls',
     label: 'µBLS',
-    title: 'Micro-focused Brillouin light scattering: thermal spectra and k-sensitivity',
+    title: 'Micro-focused Brillouin light scattering: thermal spectra',
   },
 ];
 

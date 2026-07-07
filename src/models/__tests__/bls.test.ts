@@ -71,15 +71,6 @@ describe('buildBlsJob', () => {
     expect(job.sweep?.values[4]).toBeCloseTo(0.25);
   });
 
-  it('builds a sensitivity job with its own k range and angle', () => {
-    const job = buildBlsJob(input({ mode: 'sensitivity' }));
-    expect(job.task).toBe('sensitivity');
-    expect(job.config.kMax).toBeCloseTo(20e6); // kMaxSens
-    expect(job.config.kPoints).toBe(40);
-    expect(job.config.phi).toBeCloseTo(Math.PI / 2);
-    expect(job.sweep).toBeUndefined();
-  });
-
   it('validates manual frequency window and sweep length', () => {
     expect(() =>
       buildBlsJob(input({ values: { ...defaults, fAuto: 0, fMin: 10, fMax: 5 } })),

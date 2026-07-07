@@ -6,9 +6,7 @@
  */
 import type { ParamDef } from './types';
 
-const DEG = Math.PI / 180;
-
-export type BlsMode = 'thermal' | 'sensitivity';
+export type BlsMode = 'thermal';
 
 /** Spin-wave / sample parameters (bridge `config`, SI after conversion). */
 export const BLS_SW_PARAMS: ParamDef[] = [
@@ -300,44 +298,6 @@ export const BLS_THERMAL_PARAMS: ParamDef[] = [
   },
 ];
 
-/** k-sensitivity specific parameters. */
-export const BLS_SENS_PARAMS: ParamDef[] = [
-  {
-    key: 'kMaxSens',
-    label: 'k max',
-    unit: 'rad/µm',
-    toSI: 1e6,
-    default: 12,
-    min: 1,
-    kind: 'number',
-    tooltip:
-      'Largest spin-wave wavenumber of the sensitivity sweep. Capped at ≈1.05·k₀ (~12 rad/µm at 532 nm) — the q-grid extent of the library.',
-  },
-  {
-    key: 'kPoints',
-    label: 'k points',
-    unit: '',
-    toSI: 1,
-    default: 40,
-    min: 5,
-    max: 200,
-    step: 1,
-    kind: 'int',
-    tooltip: 'Number of wavevector points (each needs one coherent BLS evaluation, ~0.2 s).',
-  },
-  {
-    key: 'phi',
-    label: 'Propagation angle φ',
-    symbol: '\\varphi',
-    unit: '°',
-    toSI: DEG,
-    default: 90,
-    kind: 'angle',
-    tooltip:
-      'In-plane angle between magnetization and the spin-wave wavevector. 90° = Damon–Eshbach.',
-  },
-];
-
 /** Parameters sweepable in the thermal mode. */
 export const BLS_SWEEPABLE_KEYS = ['Bext', 'd', 'NA', 'wavelength', 'dCover', 'temp'];
 
@@ -351,7 +311,6 @@ export const BLS_ALL_PARAMS: ParamDef[] = [
   ...BLS_OPTICS_PARAMS,
   ...BLS_STACK_PARAMS,
   ...BLS_THERMAL_PARAMS,
-  ...BLS_SENS_PARAMS,
 ];
 
 export const BLS_INFO = {

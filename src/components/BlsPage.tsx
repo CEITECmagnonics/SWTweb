@@ -3,7 +3,6 @@ import { simpleCsv } from '../export/csv';
 import {
   BLS_INFO,
   BLS_OPTICS_PARAMS,
-  BLS_SENS_PARAMS,
   BLS_STACK_PARAMS,
   BLS_SW_PARAMS,
   BLS_THERMAL_PARAMS,
@@ -11,7 +10,6 @@ import {
 } from '../models/bls';
 import type { ParamDef } from '../models/types';
 import { generateBlsNotebook } from '../notebook/generateBlsNotebook';
-import { formatValue } from '../models/units';
 import { useStore } from '../state/store';
 import { GenericParamField } from './GenericParamField';
 import { MaterialEditor } from './MaterialEditor';
@@ -132,7 +130,6 @@ function ThermalSweepSection() {
 
 export function BlsPage() {
   const bls = useStore((s) => s.bls);
-  const patchBls = useStore((s) => s.patchBls);
   const runBls = useStore((s) => s.runBls);
   const engineStatus = useStore((s) => s.engineStatus);
   const swtVersion = useStore((s) => s.swtVersion);
@@ -140,7 +137,6 @@ export function BlsPage() {
   const running = bls.status === 'running';
   const meta = bls.meta;
   const result = bls.result;
-  const thermal = bls.mode === 'thermal';
 
   const { series, heatmap, xLabel, yLabel, title } = useMemo((): {
     series: SimpleSeries[];
@@ -150,25 +146,6 @@ export function BlsPage() {
     title: string;
   } => {
     if (!result || !meta) return { series: [], heatmap: null, xLabel: '', yLabel: '', title: '' };
-    if (meta.mode === 'sensitivity') {
-      const t = result.traces.find((x) => x.quantity === 'kSensitivity');
-      return {
-        series: t
-          ? [
-              {
-                name: 'detection sensitivity',
-                x: t.x.map((k) => k * 1e-6),
-                y: t.y,
-                color: '#2563eb',
-              },
-            ]
-          : [],
-        heatmap: null,
-        xLabel: 'Wavenumber k (rad/µm)',
-        yLabel: 'Detection sensitivity (norm.)',
-        title: `µBLS k-sensitivity (coherent spin waves)`,
-      };
-    }
     const grid = result.grids[0];
     if (grid && meta.paramToSI) {
       return {
@@ -203,18 +180,10 @@ export function BlsPage() {
     };
   }, [result, meta]);
 
-  const edges = useMemo(() => {
-    if (!result?.scalars) return null;
-    const e10 = result.scalars.find((s) => s.quantity === 'edge10')?.value;
-    const e1 = result.scalars.find((s) => s.quantity === 'edge1')?.value;
-    return { e10, e1 };
-  }, [result]);
-
   const makeCsv = () => {
     if (!meta) return null;
     const header = [
-      'SpinWaveToolkit Web — µBLS',
-      `mode: ${meta.mode}`,
+      'SpinWaveToolkit Web — µBLS thermal spectrum',
       ...Object.entries(meta.paramsDisplay).map(([k, v]) => `${k}: ${v}`),
     ];
     if (heatmap) {
@@ -241,37 +210,13 @@ export function BlsPage() {
     });
   };
 
-  const durationHint = thermal
-    ? bls.sweepEnabled
-      ? `≈ ${bls.sweepPoints} × 10 s`
-      : '≈ 10 s'
-    : `≈ ${Math.round(Number(bls.values.kPoints ?? 40) * 0.25)} s`;
+  const durationHint = bls.sweepEnabled ? `≈ ${bls.sweepPoints} × 10 s` : '≈ 10 s';
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[340px_1fr]">
       <aside className="flex h-full w-full flex-col overflow-y-auto border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <Section title="µBLS calculation">
-          <div className="flex gap-1.5">
-            <Button
-              variant={thermal ? 'primary' : 'secondary'}
-              className="flex-1 !py-1.5 text-xs"
-              title="Spectrum of thermally excited spin waves (incoherent sum, Eq. 27)."
-              onClick={() => patchBls({ mode: 'thermal', result: null, meta: null, error: null })}
-            >
-              Thermal spectrum
-            </Button>
-            <Button
-              variant={!thermal ? 'primary' : 'secondary'}
-              className="flex-1 !py-1.5 text-xs"
-              title="Detection sensitivity vs wavevector for coherently excited spin waves (coherent sum, Eq. 28)."
-              onClick={() =>
-                patchBls({ mode: 'sensitivity', result: null, meta: null, error: null })
-              }
-            >
-              k-sensitivity
-            </Button>
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
             {BLS_INFO.summary}{' '}
             <a
               href={BLS_INFO.reference.url}
@@ -287,22 +232,19 @@ export function BlsPage() {
           <MaterialEditor which={1} />
         </Section>
         <Section title="Spin waves & sample">
-          <BlsParamGroup defs={BLS_SW_PARAMS} exclude={thermal ? [] : ['temp', 'nModes', 'kMax']} />
-          {!thermal && <BlsParamGroup defs={BLS_SENS_PARAMS} />}
+          <BlsParamGroup defs={BLS_SW_PARAMS} />
         </Section>
         <Section title="Optics">
           <BlsParamGroup defs={BLS_OPTICS_PARAMS} />
         </Section>
         <StackSection />
-        {thermal && (
-          <Section title="Frequency window & accuracy" defaultOpen={false}>
-            <BlsParamGroup
-              defs={BLS_THERMAL_PARAMS}
-              exclude={Number(bls.values.fAuto ?? 1) === 1 ? ['fMin', 'fMax'] : []}
-            />
-          </Section>
-        )}
-        {thermal && <ThermalSweepSection />}
+        <Section title="Frequency window & accuracy" defaultOpen={false}>
+          <BlsParamGroup
+            defs={BLS_THERMAL_PARAMS}
+            exclude={Number(bls.values.fAuto ?? 1) === 1 ? ['fMin', 'fMax'] : []}
+          />
+        </Section>
+        <ThermalSweepSection />
         <div className="border-t border-slate-200 p-3 dark:border-slate-800">
           {bls.error && (
             <p className="mb-2 max-h-24 overflow-y-auto whitespace-pre-wrap rounded-md bg-red-50 p-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300">
@@ -337,38 +279,14 @@ export function BlsPage() {
           yLabel={yLabel}
           series={series}
           heatmap={heatmap}
-          baseName={`swtweb-bls-${bls.mode}`}
+          baseName="swtweb-bls-thermal"
           makeCsv={makeCsv}
           makeNotebook={makeNotebook}
-          emptyHint={
-            thermal
-              ? 'Configure the sample, optics, and layer stack, then press Compute to model the thermal µBLS spectrum — optionally swept over a parameter into a 2D map.'
-              : 'Configure the sample and optics, then press Compute to model the µBLS detection sensitivity versus the wavevector of coherently excited spin waves.'
-          }
+          emptyHint="Configure the sample, optics, and layer stack, then press Compute to model the thermal µBLS spectrum — optionally swept over a parameter into a 2D map."
         />
-        {edges && (edges.e10 != null || edges.e1 != null) && (
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-800">
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                10 % detection edge
-              </div>
-              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                {formatValue(edges.e10 != null ? edges.e10 * 1e-6 : null)} rad/µm
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 dark:border-slate-700 dark:bg-slate-800">
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                1 % detection edge
-              </div>
-              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                {formatValue(edges.e1 != null ? edges.e1 * 1e-6 : null)} rad/µm
-              </div>
-            </div>
-          </div>
-        )}
         {meta && (
           <p className="mt-3 text-center text-xs text-slate-400 dark:text-slate-500">
-            µBLS {meta.mode} · {new Date(meta.timestamp).toLocaleString()}
+            µBLS thermal spectrum · {new Date(meta.timestamp).toLocaleString()}
           </p>
         )}
       </main>

@@ -233,13 +233,13 @@ export interface HystResult {
 
 /** Job spec for run_bls (SI). */
 export interface BlsJob {
-  task: 'thermal' | 'sensitivity';
+  task: 'thermal';
   config: Record<string, number | string | MaterialValues>;
   optics: Record<string, number>;
   sweep?: { key: string; values: number[] };
 }
 
-/** run_bls result (SI; thermal → trace or grid, sensitivity → traces + edges). */
+/** run_bls result (SI; single spectrum → trace, swept → grid). */
 export interface BlsResult {
   traces: Array<{ quantity: string; label: string; x: number[]; y: (number | null)[] }>;
   grids: Array<{
@@ -251,7 +251,6 @@ export interface BlsResult {
     y: number[];
     z: (number | null)[][];
   }>;
-  scalars?: Array<{ quantity: string; index: number; value: number | null }>;
 }
 
 /** Normalized results returned by swt_bridge.py (values SI, NaN → null). */

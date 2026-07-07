@@ -747,7 +747,7 @@ export const useStore = create<AppState>((set, get) => ({
         mode: b.mode,
         material: s.material,
         values: b.values,
-        sweepEnabled: b.mode === 'thermal' && b.sweepEnabled,
+        sweepEnabled: b.sweepEnabled,
         sweepKey: b.sweepKey,
         sweepFrom: b.sweepFrom,
         sweepTo: b.sweepTo,

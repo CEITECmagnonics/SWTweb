@@ -70,28 +70,6 @@ describe('generateBlsNotebook', () => {
     expect(nb).toContain('pcolormesh');
   });
 
-  it('produces a coherent sensitivity notebook', () => {
-    const job = buildBlsJob({
-      mode: 'sensitivity',
-      material,
-      values: defaults,
-      sweepEnabled: false,
-      sweepKey: 'Bext',
-      sweepFrom: 0,
-      sweepTo: 0,
-      sweepPoints: 2,
-    });
-    const nb = generateBlsNotebook({
-      job,
-      meta: makeMeta(job),
-      materialPresetId: 'NiFe',
-      swtVersion: '1.3.0',
-    });
-    expect(() => JSON.parse(nb)).not.toThrow();
-    expect(nb).toContain('coherent_exc=True');
-    expect(nb).toContain('detection edge');
-  });
-
   it('includes the cover layer stack when enabled', () => {
     const job = buildBlsJob({
       mode: 'thermal',

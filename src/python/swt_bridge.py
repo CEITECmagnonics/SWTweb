@@ -601,8 +601,7 @@ def _bls_apply_sweep(cfg, optics, key, value):
 
 
 def run_bls(job_json):
-    """Micro-focused BLS calculations: thermal spectra (opt. swept) and
-    coherent k-sensitivity."""
+    """Micro-focused BLS calculations: thermal spectra (optionally swept)."""
     job = json.loads(job_json)
     task = job["task"]
     cfg = dict(job["config"])
@@ -673,99 +672,6 @@ def run_bls(job_json):
                         "z": rows,
                     }
                 ],
-            }
-        )
-
-    if task == "sensitivity":
-        # Detection sensitivity for coherently excited spin waves: a delta
-        # Bloch function propagating along the beam polarization axis
-        # (Eq. (28) of the paper). NOTE the delta goes on the SECOND Bloch
-        # axis: get_signal_GF_focal interpolates the focal-field FFT with
-        # its axes transposed relative to the Bloch array (same convention
-        # as the original MATLAB GetBLSsignalCoherent.m, `M(Ind0, Ind)`).
-        exy, e_field = _bls_focal(optics)
-        # The library's internal q-grid spans ±1.1·k0; magnons beyond it
-        # cannot be represented, so cap the sweep there.
-        k0 = 2 * np.pi / optics["wavelength"]
-        kmax = min(cfg["kMax"], 1.05 * k0)
-        npts = int(cfg.get("kPoints", 40))
-        dk = kmax / npts
-        half = int(np.ceil(npts * 1.25))
-        kx = np.arange(-half, half + 1) * dk
-        ky = kx.copy()
-        iy0 = int(np.argmin(np.abs(ky)))
-        df, pm, thicknesses, source = _bls_stack(cfg)
-        material = _make_material(cfg["material"])
-        ks, sens, freqs = [], [], []
-        for ix in range(len(kx)):
-            kv = kx[ix]
-            if kv < dk / 2 or kv > kmax + dk / 2:
-                continue
-            model = SWT.SingleLayer(
-                Bext=cfg["Bext"],
-                kxi=np.array([max(kv, 1e-6)]),
-                theta=cfg.get("theta", np.pi / 2),
-                phi=cfg.get("phi", np.pi / 2),
-                d=cfg["d"],
-                material=material,
-            )
-            w0 = float(np.real(model.GetDispersion(n=0)[0]))
-            b2 = np.zeros((1, len(kx), len(ky)), dtype=complex)
-            # delta on the second axis (see note above); Mz = -i*Mx as in
-            # the reference MATLAB implementation
-            b2[0, iy0, ix] = 1.0
-            bloch = np.array([b2, np.zeros_like(b2), -1j * b2])
-            sigma = SWT.bls.get_signal_GF_focal(
-                SweepBloch=np.array([w0]),
-                KxKyBloch=[kx, ky],
-                Bloch=bloch,
-                Exy=exy,
-                E=e_field,
-                DF=df,
-                PM=pm,
-                d=thicknesses,
-                NA=optics["NA"],
-                Nq=int(cfg.get("nQ", 30)),
-                source_layer_index=source,
-                wavelength=optics["wavelength"],
-                coherent_exc=True,
-            )
-            ks.append(float(kv))
-            freqs.append(w0)
-            sens.append(float(np.abs(np.asarray(sigma, dtype=complex)).ravel()[0]))
-        sens = np.asarray(sens)
-        peak = float(np.max(sens)) if len(sens) else 1.0
-        if peak > 0:
-            sens = sens / peak
-        # Detection edges (largest k where sensitivity is still above level).
-        scalars = []
-        for level, qid in ((0.1, "edge10"), (0.01, "edge1")):
-            above = [k for k, s in zip(ks, sens) if s >= level]
-            scalars.append(
-                {
-                    "quantity": qid,
-                    "index": 0,
-                    "value": float(max(above)) if above else None,
-                }
-            )
-        return json.dumps(
-            {
-                "traces": [
-                    {
-                        "quantity": "kSensitivity",
-                        "label": "",
-                        "x": ks,
-                        "y": _clean_1d(sens),
-                    },
-                    {
-                        "quantity": "kSensFreq",
-                        "label": "",
-                        "x": ks,
-                        "y": _clean_1d(freqs),
-                    },
-                ],
-                "grids": [],
-                "scalars": scalars,
             }
         )
 
