@@ -5,6 +5,7 @@ import { downloadImage, copyImageToClipboard } from '../export/image';
 import { downloadText, timestampSlug } from '../export/download';
 import { Button } from './ui';
 import { PlotlyChart } from './PlotlyChart';
+import { ShareButton } from './ShareButton';
 
 export interface SimpleSeries {
   name: string;
@@ -134,6 +135,8 @@ export function SimplePlot({
         <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
           Export
         </span>
+        <ShareButton scope="page" />
+        <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
         <Button
           onClick={() =>
             guard(async () => {

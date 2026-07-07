@@ -5,11 +5,22 @@ import { EngineStatusBanner } from './components/LoadingOverlay';
 import { HysteresisPage } from './components/HysteresisPage';
 import { PlotCustomization } from './components/PlotCustomization';
 import { PlotPanel } from './components/PlotPanel';
+import { ShareButton } from './components/ShareButton';
 import { Sidebar } from './components/Sidebar';
 import { SweepPage } from './components/SweepPage';
 import { TraceList } from './components/TraceList';
 import { pageFromHash, useStore, type PageId } from './state/store';
+import { buildShareUrl, parseShareFromHash, stripSharePayloadFromHash, type ShareScope } from './share/urlState';
 import swtLogoUrl from './assets/spinwavetoolkit-logo-text.svg';
+
+declare global {
+  interface Window {
+    __swtwebShare?: {
+      build: (scope: ShareScope) => string;
+      parse: (hash: string) => ReturnType<typeof parseShareFromHash>;
+    };
+  }
+}
 
 const PAGES: Array<{ id: PageId; label: string; title: string }> = [
   { id: 'dispersion', label: 'Dispersion', title: 'Spin-wave characteristics vs wavenumber k' },
@@ -86,6 +97,7 @@ function Header() {
       </div>
       <PageNav />
       <div className="flex items-center gap-2">
+        <ShareButton scope="app" />
         <a
           href="https://ceitecmagnonics.github.io/SpinWaveToolkit/stable/"
           target="_blank"
@@ -115,11 +127,62 @@ function Header() {
   );
 }
 
+function ShareStatusBanner() {
+  const message = useStore((s) => s.shareMessage);
+  const clearShareMessage = useStore((s) => s.clearShareMessage);
+  if (!message) return null;
+  const isError = message.startsWith('Could not');
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 border-b px-4 py-2 text-sm ${
+        isError
+          ? 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200'
+          : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200'
+      }`}
+    >
+      <span>{message}</span>
+      <button type="button" className="text-xs underline" onClick={clearShareMessage}>
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const initEngine = useStore((s) => s.initEngine);
   const theme = useStore((s) => s.theme);
   const page = useStore((s) => s.page);
   const setPage = useStore((s) => s.setPage);
+  const hydrateFromShare = useStore((s) => s.hydrateFromShare);
+  const markShareError = useStore((s) => s.markShareError);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    window.__swtwebShare = {
+      build: (scope) => buildShareUrl(useStore.getState(), scope),
+      parse: parseShareFromHash,
+    };
+    return () => {
+      delete window.__swtwebShare;
+    };
+  }, []);
+
+  useEffect(() => {
+    const queryStart = window.location.hash.indexOf('?');
+    const hasSharePayload =
+      queryStart >= 0 && new URLSearchParams(window.location.hash.slice(queryStart + 1)).has('s');
+    if (!hasSharePayload) return;
+
+    const envelope = parseShareFromHash(window.location.hash);
+    if (envelope) hydrateFromShare(envelope);
+    else markShareError();
+    const cleanHash = envelope
+      ? envelope.page === 'dispersion'
+        ? '#/'
+        : `#/${envelope.page}`
+      : stripSharePayloadFromHash(window.location.hash);
+    window.history.replaceState(null, '', cleanHash);
+  }, [hydrateFromShare, markShareError]);
 
   useEffect(() => {
     initEngine();
@@ -139,6 +202,7 @@ export default function App() {
     return (
       <div className="flex h-full flex-col">
         <Header />
+        <ShareStatusBanner />
         <EngineStatusBanner />
         {page === 'sweep' ? <SweepPage /> : page === 'hysteresis' ? <HysteresisPage /> : <BlsPage />}
       </div>
@@ -148,6 +212,7 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <Header />
+      <ShareStatusBanner />
       <EngineStatusBanner />
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[340px_1fr]">
         <Sidebar />
