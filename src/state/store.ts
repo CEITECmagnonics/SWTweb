@@ -24,6 +24,8 @@ import { getMaterialPreset } from '../models/materials';
 import type { KUnitId } from '../models/units';
 import { SwtEngine } from '../pyodide/swtClient';
 import type { EngineStage } from '../pyodide/protocol';
+import { hydrateShareState } from '../share/urlState';
+import type { ShareEnvelope } from '../share/urlState';
 
 export const TRACE_PALETTE = [
   '#2563eb', // blue
@@ -202,6 +204,7 @@ interface AppState {
   engineStage: EngineStage | null;
   engineError: string | null;
   computeError: string | null;
+  shareMessage: string | null;
   swtVersion: string | null;
   pyodideVersion: string | null;
 
@@ -249,6 +252,9 @@ interface AppState {
   clearResults: () => void;
   setPlotSettings: (patch: Partial<PlotSettings>) => void;
   toggleTheme: () => void;
+  hydrateFromShare: (envelope: ShareEnvelope) => boolean;
+  markShareError: () => void;
+  clearShareMessage: () => void;
 
   setPage: (page: PageId) => void;
   setMacrospinValue: (key: string, value: number | string | null) => void;
@@ -361,6 +367,7 @@ export const useStore = create<AppState>((set, get) => ({
   engineStage: null,
   engineError: null,
   computeError: null,
+  shareMessage: null,
   swtVersion: null,
   pyodideVersion: null,
 
@@ -559,6 +566,20 @@ export const useStore = create<AppState>((set, get) => ({
   setPlotSettings: (patch) => set((s) => ({ plotSettings: { ...s.plotSettings, ...patch } })),
 
   toggleTheme: () => set((s) => ({ theme: s.theme === 'light' ? 'dark' : 'light' })),
+
+  hydrateFromShare: (envelope) => {
+    const patch = hydrateShareState(get(), envelope);
+    if (!patch) {
+      set({ shareMessage: 'Could not read shared link.' });
+      return false;
+    }
+    set({ ...patch, shareMessage: 'Parameters loaded from shared link.' });
+    return true;
+  },
+
+  markShareError: () => set({ shareMessage: 'Could not read shared link.' }),
+
+  clearShareMessage: () => set({ shareMessage: null }),
 
   setPage: (page) => {
     if (typeof window !== 'undefined') {

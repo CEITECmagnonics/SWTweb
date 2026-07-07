@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "katex": "^0.16.22",
+    "lz-string": "^1.5.0",
     "plotly.js-dist-min": "^3.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

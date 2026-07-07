@@ -6,6 +6,7 @@ import { generateNotebook } from '../notebook/generateNotebook';
 import { buildJob, describeParams } from '../models/job';
 import { getModel } from '../models/registry';
 import { useStore } from '../state/store';
+import { ShareButton } from './ShareButton';
 import { Button } from './ui';
 
 export function ExportBar({
@@ -105,6 +106,8 @@ export function ExportBar({
       <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
         Export
       </span>
+      <ShareButton scope="page" />
+      <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
       <Button onClick={() => exportImage('png')} title="Download the plot as a PNG image">
         PNG
       </Button>
