@@ -96,6 +96,70 @@ describe('generateSweepNotebook', () => {
     expect(nb).toContain('maceq.Bext[\\"Bext\\"] = value');
   });
 
+  it('threads a method-only swept key into the Get* calls, not the constructor', () => {
+    // SC-coupled tol/d_is exist only on the Get* methods; putting them into
+    // the constructor crashed the generated notebook with a TypeError.
+    const sc = getModel('SingleLayerSCcoupled');
+    const job = buildSweepJob({
+      ...baseInput,
+      modelId: 'SingleLayerSCcoupled',
+      paramValues: defaults([...sc.params, ...(sc.methodParams ?? [])]),
+      kRange: sc.kDefault,
+      sweepKey: 'd_is',
+      from: 0,
+      to: 20,
+      points: 5,
+    });
+    const nb = generateSweepNotebook({
+      job,
+      meta: sweepMeta(job, { modelId: 'SingleLayerSCcoupled', key: 'd_is' }),
+      materialPresetId: 'NiFe',
+      swtVersion: '1.3.0',
+    });
+    expect(nb).toContain('d_is=value');
+    expect(nb).not.toContain('d_is=value,  # swept'); // not a constructor arg
+    expect(nb).not.toMatch(/SingleLayerSCcoupled\([^)]*d_is=/s);
+  });
+
+  it('keeps the anisotropy axis angles when sweeping macrospin Ku', () => {
+    const job = buildSweepJob({
+      ...baseInput,
+      modelId: 'Macrospin',
+      macrospinValues: {
+        ...defaults(MACROSPIN_PARAMS),
+        ani1_theta: 90,
+        ani1_phi: 45,
+      },
+      sweepKey: 'ani1_Ku',
+      from: 0,
+      to: 50,
+      points: 5,
+    });
+    const nb = generateSweepNotebook({
+      job,
+      meta: sweepMeta(job, { modelId: 'Macrospin', key: 'ani1_Ku' }),
+      materialPresetId: 'NiFe',
+      swtVersion: '1.3.0',
+    });
+    // theta = 90° and phi = 45° in radians, taken from the config — never
+    // derived from maceq.anis (which may not exist at Ku = 0).
+    expect(nb).toContain('add_uniaxial_anisotropy(\\"ani1\\", Ku=value');
+    expect(nb).toContain('phi=0.785398163397');
+    expect(nb).not.toContain('maceq.anis[');
+  });
+
+  it('reproduces every selected mode in map-mode sweeps', () => {
+    const job = buildSweepJob({ ...baseInput, mode: 'map', modes: [0, 1] });
+    const nb = generateSweepNotebook({
+      job,
+      meta: sweepMeta(job, { mode: 'map' }),
+      materialPresetId: 'NiFe',
+      swtVersion: '1.3.0',
+    });
+    expect(nb).toContain('modes = [0,1]');
+    expect(nb).toContain('for m, zrows in zmaps.items()');
+  });
+
   it('adds warm-start relaxation for double-layer sweeps', () => {
     const dl = getModel('DoubleLayerNumeric');
     const job = buildSweepJob({

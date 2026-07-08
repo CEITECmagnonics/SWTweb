@@ -113,6 +113,93 @@ const dp = (): ParamDef => ({
   tooltip: 'Pinning parameter used with the partially-pinned boundary condition (type 4).',
 });
 
+/**
+ * The Tacchi numeric solver only implements the totally-unpinned boundary
+ * condition for N ≥ 2 modes (SWT 1.3.0 raises for BC 2-4), so the numeric
+ * model gets a restricted choice list instead of the shared boundaryCond().
+ */
+const boundaryCondNumeric = (): ParamDef => ({
+  key: 'boundary_cond',
+  label: 'Boundary condition',
+  unit: '',
+  toSI: 1,
+  default: 1,
+  kind: 'choice',
+  choices: [{ value: 1, label: 'Totally unpinned (1)' }],
+  tooltip:
+    'Boundary condition for the dynamic magnetization. SWT 1.3.0 implements only the totally-unpinned condition in the Tacchi numeric solver (other types raise an error for N ≥ 2 modes).',
+});
+
+/** External-field angles for SingleLayer: empty = field collinear with M. */
+const fieldAngles = (): ParamDef[] => [
+  {
+    key: 'theta_H',
+    label: 'Field polar angle',
+    symbol: '\\theta_H',
+    unit: '°',
+    toSI: DEG,
+    default: null,
+    nullable: true,
+    nullBehavior: 'omit',
+    nullLabel: 'same as θ',
+    kind: 'angle',
+    advanced: true,
+    tooltip:
+      'Polar angle of the external field, independent of the magnetization. Empty = collinear with θ. When set, SWT solves the equilibrium magnetization direction (canted states).',
+  },
+  {
+    key: 'phi_H',
+    label: 'Field azimuthal angle',
+    symbol: '\\varphi_H',
+    unit: '°',
+    toSI: DEG,
+    default: null,
+    nullable: true,
+    nullBehavior: 'omit',
+    nullLabel: 'same as φ',
+    kind: 'angle',
+    advanced: true,
+    tooltip:
+      'Azimuthal angle of the external field, independent of the magnetization. Empty = collinear with φ.',
+  },
+];
+
+/** Bose-Einstein weighting of the Bloch-function heatmap (both must be set in SWT;
+ *  the bridge fills the library-default µ when only T is given). */
+const blochThermalParams = (): ParamDef[] => [
+  {
+    key: 'temp',
+    label: 'Bloch temperature',
+    symbol: 'T',
+    unit: 'K',
+    toSI: 1,
+    default: null,
+    min: 0.01,
+    nullable: true,
+    nullBehavior: 'omit',
+    nullLabel: 'no thermal weighting',
+    kind: 'number',
+    advanced: true,
+    tooltip:
+      'Temperature for Bose–Einstein weighting of the Bloch-function heatmap. Empty = plain spectral function (no thermal occupation).',
+  },
+  {
+    key: 'mu',
+    label: 'Magnon chemical potential',
+    symbol: '\\mu',
+    unit: 'GHz·h',
+    toSI: 6.62607015e-34 * 1e9,
+    default: null,
+    nullable: true,
+    nullBehavior: 'omit',
+    nullLabel: '−1000 GHz·h (default)',
+    kind: 'number',
+    advanced: true,
+    tooltip:
+      'Chemical potential of the magnon distribution in frequency units (µ = h·f). Only used together with the Bloch temperature; empty = SWT example default −10¹²·h.',
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Shared quantity builders
 // ---------------------------------------------------------------------------
@@ -220,7 +307,8 @@ const FILM_K_DEFAULT = { min: 1, max: 25e6, points: 200, spacing: 'linear' as co
 const singleLayer: ModelDef = {
   id: 'SingleLayer',
   label: 'Single layer (analytical, Kalinikos–Slavin)',
-  params: [bext(), thickness(), theta(), phi(), boundaryCond(), dp(), weff()],
+  params: [bext(), thickness(), theta(), phi(), boundaryCond(), dp(), weff(), ...fieldAngles()],
+  methodParams: blochThermalParams(),
   quantities: [
     qDispersion({ modeArg: 'n_nT' }),
     qGroupVelocity({ modeArg: 'n_nT' }),
@@ -235,28 +323,31 @@ const singleLayer: ModelDef = {
       unit: '–',
       scale: 1,
       returns: 'array',
-      tooltip: 'Ellipticity of the magnetization precession ellipse (0 = circular, 1 = linear).',
+      tooltip:
+        'Ellipticity of the magnetization precession ellipse (0 = circular, 1 = linear). Computed by SWT for the lowest mode (n = 0) regardless of the mode selection.',
     },
-    qBloch({ modeArg: 'n_nT' }),
+    qBloch({ modeArg: 'n_nT', kwargNames: ['temp', 'mu'] }),
     qExchangeLen(),
     {
       id: 'couplingParam',
       method: 'GetCouplingParam',
       label: 'Parallel-pumping coupling V',
-      axisLabel: 'V (GHz/T)',
+      axisLabel: 'Coupling parameter V (GHz/T)',
       unit: 'GHz/T',
       scale: RADHZ_TO_GHZ,
-      returns: 'scalar',
-      tooltip: 'Coupling parameter for parallel pumping experiments.',
+      returns: 'array',
+      tooltip:
+        'k-dependent coupling parameter for parallel pumping experiments. Computed by SWT for the lowest mode (n = 0) regardless of the mode selection.',
+      nbConvert: ' * 1e-9 / (2 * np.pi)  # rad*Hz/T -> GHz/T',
     },
     {
       id: 'thresholdField',
       method: 'GetThresholdField',
       label: 'Parallel-pumping threshold field',
-      axisLabel: 'b_th (mT)',
+      axisLabel: 'Threshold field b_th (mT)',
       unit: 'mT',
       scale: 1e3,
-      returns: 'scalar',
+      returns: 'array',
       tooltip: 'Threshold microwave field for the parallel-pumping instability.',
     },
   ],
@@ -299,8 +390,7 @@ const singleLayerNumeric: ModelDef = {
     thickness(),
     theta(),
     phi(),
-    boundaryCond(),
-    dp(),
+    boundaryCondNumeric(),
     weff(),
     {
       key: 'KuOOP',
@@ -327,6 +417,7 @@ const singleLayerNumeric: ModelDef = {
         'Number of lowest thickness modes included in the eigenvalue problem (matrix size 2N×2N).',
     },
   ],
+  methodParams: blochThermalParams(),
   quantities: [
     qDispersion({
       returns: 'tuple_stacked',
@@ -337,7 +428,7 @@ const singleLayerNumeric: ModelDef = {
     qLifetime({ modeArg: 'n' }),
     qDecLen({ modeArg: 'n' }),
     qDos({ modeArg: 'n' }),
-    qBloch({ modeArg: 'n' }),
+    qBloch({ modeArg: 'n', kwargNames: ['temp', 'mu'] }),
     qExchangeLen(),
   ],
   kDefault: FILM_K_DEFAULT,
@@ -367,7 +458,17 @@ const doubleLayerNumeric: ModelDef = {
     bext(),
     thickness('d', 'Layer 1 thickness', 30),
     thickness('d2', 'Layer 2 thickness', 30),
-    theta(),
+    {
+      // In DoubleLayerNumeric theta is the FIELD polar angle; the dynamic
+      // dispersion assumes in-plane magnetization (SWT 1.3.0 does not
+      // implement OOP tilt) and theta only rescales the in-plane field
+      // projection during the equilibrium search.
+      ...theta(),
+      label: 'Field polar angle',
+      symbol: '\\theta_H',
+      tooltip:
+        'Out-of-plane angle of the external field. Note: the magnetization stays in-plane — SWT does not implement out-of-plane tilt in this model; θ only scales the in-plane field projection.',
+    },
     phi(),
     {
       key: 's',
@@ -476,6 +577,7 @@ const doubleLayerNumeric: ModelDef = {
         'Initial guess of the equilibrium magnetization angle of layer 2 for the energy minimization (°).',
     },
   ],
+  methodParams: blochThermalParams(),
   quantities: [
     qDispersion({
       returns: 'tuple_stacked',
@@ -499,7 +601,7 @@ const doubleLayerNumeric: ModelDef = {
     qLifetime({ modeArg: 'n', stackedLabels: ['acoustic', 'optic'] }),
     qDecLen({ modeArg: 'n', stackedLabels: ['acoustic', 'optic'] }),
     qDos({ modeArg: 'n', stackedLabels: ['acoustic', 'optic'] }),
-    qBloch({ modeArg: 'n' }),
+    qBloch({ modeArg: 'n', kwargNames: ['temp', 'mu'] }),
     qExchangeLen(),
   ],
   kDefault: FILM_K_DEFAULT,
@@ -535,10 +637,11 @@ const singleLayerSCcoupled: ModelDef = {
       unit: 'nm',
       toSI: 1e-9,
       default: 100,
-      min: 1,
+      min: 0,
       step: 10,
       kind: 'number',
-      tooltip: 'London penetration depth of the superconductor (nm).',
+      tooltip:
+        'London penetration depth of the superconductor (nm). 0 = ideal superconductor (perfect-reflection limit).',
     },
   ],
   methodParams: [
@@ -589,10 +692,13 @@ const singleLayerSCcoupled: ModelDef = {
       unit: '',
       toSI: 1,
       default: 1e-5,
+      min: 1e-9,
       kind: 'number',
       advanced: true,
-      tooltip: 'Convergence tolerance of the iterative spin-wave ellipticity solver.',
+      tooltip:
+        'Convergence tolerance of the iterative spin-wave ellipticity solver (must be > 0; too small values may not converge).',
     },
+    ...blochThermalParams(),
   ],
   quantities: [
     qDispersion({ kwargNames: ['model', 'tol', 'd_sc', 'd_is'] }),
@@ -611,7 +717,7 @@ const singleLayerSCcoupled: ModelDef = {
       kwargNames: ['tol', 'd_sc', 'd_is'],
       tooltip: 'Spin-wave ellipticity obtained iteratively (0 < a_ky ≤ 1).',
     },
-    qBloch({ kwargNames: ['model', 'tol', 'd_sc', 'd_is'] }),
+    qBloch({ kwargNames: ['model', 'tol', 'd_sc', 'd_is', 'temp', 'mu'] }),
   ],
   kDefault: FILM_K_DEFAULT,
   modes: null,

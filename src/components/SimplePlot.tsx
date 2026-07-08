@@ -3,7 +3,7 @@ import type Plotly from 'plotly.js-dist-min';
 import { useStore } from '../state/store';
 import { downloadImage, copyImageToClipboard } from '../export/image';
 import { downloadText, timestampSlug } from '../export/download';
-import { Button } from './ui';
+import { Button, useFlash } from './ui';
 import { PlotlyChart } from './PlotlyChart';
 import { ShareButton } from './ShareButton';
 
@@ -51,7 +51,7 @@ export function SimplePlot({
   const divRef = useRef<HTMLDivElement | null>(null);
   const [logX, setLogX] = useState(false);
   const [logY, setLogY] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const { message, flash, guard } = useFlash();
 
   const hasData = (series && series.length > 0) || heatmap;
 
@@ -95,18 +95,6 @@ export function SimplePlot({
     };
     return { data, layout };
   }, [series, heatmap, title, xLabel, yLabel, logX, logY, theme]);
-
-  const flash = (text: string) => {
-    setMessage(text);
-    window.setTimeout(() => setMessage(null), 2500);
-  };
-  const guard = async (fn: () => Promise<void> | void) => {
-    try {
-      await fn();
-    } catch (err) {
-      flash(err instanceof Error ? err.message : String(err));
-    }
-  };
 
   if (!hasData) {
     return (

@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { tracesToCsv, resultsToJson } from '../export/csv';
 import { downloadImage, copyImageToClipboard } from '../export/image';
 import { downloadText, timestampSlug } from '../export/download';
@@ -7,7 +6,7 @@ import { buildJob, describeParams } from '../models/job';
 import { getModel } from '../models/registry';
 import { useStore } from '../state/store';
 import { ShareButton } from './ShareButton';
-import { Button } from './ui';
+import { Button, useFlash } from './ui';
 
 export function ExportBar({
   getPlotDiv,
@@ -16,20 +15,7 @@ export function ExportBar({
   getPlotDiv: () => HTMLElement | null;
   activeQuantity: string | null;
 }) {
-  const [message, setMessage] = useState<string | null>(null);
-
-  const flash = (text: string) => {
-    setMessage(text);
-    window.setTimeout(() => setMessage(null), 2500);
-  };
-
-  const guard = async (fn: () => Promise<void> | void) => {
-    try {
-      await fn();
-    } catch (err) {
-      flash(err instanceof Error ? err.message : String(err));
-    }
-  };
+  const { message, flash, guard } = useFlash();
 
   const exportImage = (format: 'png' | 'svg') =>
     guard(async () => {

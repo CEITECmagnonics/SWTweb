@@ -45,6 +45,9 @@ describe('generateBlsNotebook', () => {
     expect(nb).toContain('GetBlochFunction');
     expect(nb).toContain('10.1103/PhysRevB.110.224428');
     expect(nb).toContain('10.1088/1361-648X/ae6430');
+    // detection optics mirror the bridge call (quotes JSON-escaped in .ipynb)
+    expect(nb).toContain('output_analyzer=\\"none\\"');
+    expect(nb).toContain('collectionSpot=0.000001');
   });
 
   it('produces a swept thermal notebook with pcolormesh', () => {

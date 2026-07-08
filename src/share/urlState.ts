@@ -197,6 +197,9 @@ export function hydrateShareState(current: ShareableState, envelope: ShareEnvelo
   }
 
   const data = envelope.data as PageShare;
+  // Defense in depth: a hand-crafted URL could carry mismatched pages, which
+  // would navigate to one page while hydrating another's state.
+  if (data.page !== envelope.page) return null;
   applyCommon(patch, data.common);
   if (data.page === 'dispersion') applyDispersion(patch, current, data.dispersion);
   if (data.page === 'sweep') applySweep(patch, current, data.sweep);
@@ -502,11 +505,17 @@ function cleanMaterialPreset(input: unknown): string {
 
 function cleanKRange(input: unknown, fallback: KRange): KRange {
   if (!isRecord(input)) return { ...fallback };
-  const min = cleanFinite(input.min, fallback.min, 0);
-  const max = cleanFinite(input.max, fallback.max, 0);
+  let min = cleanFinite(input.min, fallback.min, 0);
+  let max = cleanFinite(input.max, fallback.max, 0);
+  // A hostile payload may combine a huge min with a rejected max — the
+  // hydrated range must itself be valid, not merely fail at compute time.
+  if (max <= min) {
+    min = fallback.min;
+    max = fallback.max > min ? fallback.max : min + 1;
+  }
   return {
     min,
-    max: max > min ? max : fallback.max,
+    max,
     points: cleanInteger(input.points, fallback.points, 2, 5000),
     spacing: input.spacing === 'log' ? 'log' : 'linear',
   };
@@ -515,7 +524,7 @@ function cleanKRange(input: unknown, fallback: KRange): KRange {
 function cleanModes(input: unknown, modelId: ModelId, fallback: number[]): number[] {
   const config = getModel(modelId).modes;
   if (!config) return [0];
-  if (!Array.isArray(input)) return fallback.length ? fallback : [0];
+  if (!Array.isArray(input)) return fallback.length ? [...fallback] : [0];
   const max = Math.max(0, config.max);
   const seen = new Set<number>();
   for (const raw of input.slice(0, 16)) {

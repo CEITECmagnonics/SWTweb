@@ -301,12 +301,21 @@ ${plotFooter(q.axisLabel, q.label)}`),
     }
 
     case 'grid': {
-      const modeArgStr =
+      // Mode arguments plus method kwargs (e.g. Bose-Einstein temp/mu).
+      const modePart =
         jq.modeArg === 'n_nT'
           ? `n=${job.modes[0]}, nT=${job.nT}`
           : jq.modeArg === 'n'
             ? `n=${job.modes[0]}`
-            : kw;
+            : '';
+      // SWT weights only when BOTH temp and mu are given — mirror the
+      // bridge's library-default mu when the user set just the temperature.
+      const mk = job.methodKwargs ?? {};
+      const muDefault =
+        jq.kwargNames?.includes('temp') && mk.temp !== undefined && mk.mu === undefined
+          ? 'mu=-1e12 * SWT.H'
+          : '';
+      const modeArgStr = [modePart, kw, muDefault].filter(Boolean).join(', ');
       return [
         code(`# ${q.label}
 w, bloch = model.${q.method}(${modeArgStr})

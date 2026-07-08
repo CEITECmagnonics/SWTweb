@@ -136,6 +136,45 @@ export const BLS_OPTICS_PARAMS: ParamDef[] = [
     advanced: true,
     tooltip: 'Real-space half-width of the computed focal field (µm).',
   },
+  {
+    key: 'analyzer',
+    label: 'Output analyzer',
+    unit: '',
+    toSI: 1,
+    default: 'none',
+    kind: 'choice',
+    choices: [
+      { value: 'none', label: 'none (detect both polarizations)' },
+      { value: 'linear', label: 'linear (at analyzer angle)' },
+      { value: 'circular_r', label: 'circular, right' },
+      { value: 'circular_l', label: 'circular, left' },
+      { value: 'radial', label: 'radial' },
+      { value: 'azimuthal', label: 'azimuthal' },
+    ],
+    tooltip:
+      'Polarization analyzer in front of the detector. Typical µBLS uses a crossed linear analyzer (90°) to suppress elastically scattered light.',
+  },
+  {
+    key: 'analyzerAngle',
+    label: 'Analyzer angle',
+    unit: '°',
+    toSI: 1,
+    default: 90,
+    kind: 'angle',
+    tooltip:
+      'Angle of the linear analyzer, counter-clockwise from the incident x polarization (90° = crossed). Ignored for the other analyzer types.',
+  },
+  {
+    key: 'collectionSpot',
+    label: 'Collection spot',
+    unit: 'µm',
+    toSI: 1e-6,
+    default: 1,
+    min: 0.05,
+    kind: 'number',
+    advanced: true,
+    tooltip: 'Detection beam waist on the sample (µm) — the real-space collection filter.',
+  },
 ];
 
 /** Optical layer stack: superstrate (air) / [cover] / magnet / substrate. */

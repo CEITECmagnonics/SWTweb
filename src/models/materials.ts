@@ -140,7 +140,8 @@ export const MATERIAL_FIELDS: MaterialFieldDef[] = [
     symbol: 'K_\\mathrm{u}',
     unit: 'mJ/m²',
     toSI: 1e-3,
-    tooltip: 'Surface anisotropy strength (mJ/m²); sets the pinning parameter.',
+    tooltip:
+      'Surface anisotropy strength (mJ/m²). Note: unused by SWT 1.3.0 dispersion calculations — set the pinning parameter dp directly (boundary condition 4) instead.',
   },
 ];
 
