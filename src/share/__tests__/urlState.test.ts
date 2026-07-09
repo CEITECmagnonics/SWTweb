@@ -108,6 +108,43 @@ describe('share URL state', () => {
     expect(patch?.bls?.values.method).toBe('RT');
   });
 
+  it('loads a µBLS page share, dropping a stray Ku and resetting traces', () => {
+    const base = baseState();
+    const envelope = {
+      v: 1,
+      scope: 'page',
+      page: 'bls',
+      data: {
+        page: 'bls',
+        common: {
+          materialPresetId: 'NiFe',
+          material: getMaterialPreset('NiFe').values,
+          materialPresetId2: 'NiFe',
+          material2: getMaterialPreset('NiFe').values,
+        },
+        bls: {
+          mode: 'thermal',
+          // Ku is no longer a µBLS parameter; an old link may still carry it.
+          values: { ...base.bls.values, Bext: 75, mu: -500, Ku: 999 },
+          sweepEnabled: false,
+          sweepKey: 'Bext',
+          sweepFrom: 10,
+          sweepTo: 250,
+          sweepPoints: 9,
+        },
+      },
+    } as unknown as ShareEnvelope;
+
+    const patch = hydrateShareState(base, envelope);
+    expect(patch?.page).toBe('bls');
+    expect(patch?.bls?.values.Bext).toBe(75);
+    // The chemical potential survives; the stray Ku is silently ignored.
+    expect(patch?.bls?.values.mu).toBe(-500);
+    expect('Ku' in (patch?.bls?.values ?? {})).toBe(false);
+    // Computed traces are never shared.
+    expect(patch?.bls?.traces).toEqual([]);
+  });
+
   it('builds, parses, and strips hash-local share URLs', () => {
     const url = buildShareUrl(baseState(), 'page', 'https://example.test/SWTweb/#/bls');
     const parsed = new URL(url);

@@ -397,6 +397,9 @@ function applyBls(patch: HydratedShareState, current: ShareableState, input: unk
     error: null,
     result: null,
     meta: null,
+    // Computed traces are never shared (mirrors the dispersion page).
+    traces: [],
+    runCounter: 0,
   };
 }
 

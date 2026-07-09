@@ -26,6 +26,11 @@ function num(v: unknown, fallback = 0): number {
   return typeof v === 'number' ? v : fallback;
 }
 
+/** Bose-Einstein chemical potential as a Python energy expression (µ = h·µ/h). */
+function muExpr(job: BlsJob): string {
+  return `SWT.H * ${py(num(job.config.mu, -1e12))}`;
+}
+
 function stackCells(job: BlsJob): string {
   const c = job.config;
   const cover = Number(c.coverEnabled) === 1;
@@ -77,7 +82,7 @@ model = SWT.SingleLayer(Bext=${py(num(c.Bext))}, kxi=K.flatten(), theta=np.pi / 
 w_common = np.linspace(f_min, f_max, Nf) * 2 * np.pi  # (rad/s)
 Bloch2D = np.zeros((Nf, Nk, Nk), dtype=complex)
 for n in range(${py(num(c.nModes, 2))}):
-    w, bf = model.GetBlochFunction(n=n, Nf=Nf, temp=${py(num(c.temp, 300))}, mu=-1e12 * SWT.H)
+    w, bf = model.GetBlochFunction(n=n, Nf=Nf, temp=${py(num(c.temp, 300))}, mu=${muExpr(job)})
     bf = bf.reshape(Nf, Nk, Nk)
     for i in range(Nk):
         for j in range(Nk):
@@ -205,7 +210,7 @@ ${opticsRecompute}    Nk = ${py(num(c.nK, 48))}; Nf = ${py(num(c.nF, 61))}; k_ma
     w_common = np.linspace(f_min, f_max, Nf) * 2 * np.pi
     Bloch2D = np.zeros((Nf, Nk, Nk), dtype=complex)
     for n in range(${py(num(c.nModes, 2))}):
-        w, bf = model.GetBlochFunction(n=n, Nf=Nf, temp=${tempExpr}, mu=-1e12 * SWT.H)
+        w, bf = model.GetBlochFunction(n=n, Nf=Nf, temp=${tempExpr}, mu=${muExpr(job)})
         bf = bf.reshape(Nf, Nk, Nk)
         for i in range(Nk):
             for j in range(Nk):
@@ -238,7 +243,7 @@ ${
     w_common = np.linspace(f_min, f_max, Nf) * 2 * np.pi
     Bloch2D = np.zeros((Nf, Nk, Nk), dtype=complex)
     for n in range(${py(num(c.nModes, 2))}):
-        w, bf = model.GetBlochFunction(n=n, Nf=Nf, temp=${tempExpr}, mu=-1e12 * SWT.H)
+        w, bf = model.GetBlochFunction(n=n, Nf=Nf, temp=${tempExpr}, mu=${muExpr(job)})
         bf = bf.reshape(Nf, Nk, Nk)
         for i in range(Nk):
             for j in range(Nk):
@@ -249,10 +254,11 @@ ${
 spectra = np.array(spectra)`);
   }
   nb.code(`fig, ax = plt.subplots()
-pcm = ax.pcolormesh(w_common / 2 / np.pi / 1e9, sweep_values, spectra, shading="auto", cmap="viridis")
+# Frequency on the vertical axis, swept parameter on the horizontal axis.
+pcm = ax.pcolormesh(sweep_values, w_common / 2 / np.pi / 1e9, spectra.T, shading="auto", cmap="viridis")
 fig.colorbar(pcm, ax=ax, label="BLS intensity (arb. u.)")
-ax.set_xlabel("Frequency (GHz)")
-ax.set_ylabel("${input.meta.paramLabel ?? key} (SI)")
+ax.set_xlabel("${input.meta.paramLabel ?? key} (SI)")
+ax.set_ylabel("Frequency (GHz)")
 ax.set_title("Thermal µBLS spectra vs ${input.meta.paramLabel ?? key}")
 plt.show()`);
 }
@@ -279,6 +285,7 @@ ${paramsTable(input.meta.paramsDisplay)}`);
       'material',
       input.materialPresetId,
       input.job.config.material as never,
+      { omitKu: true },
     ),
   );
 

@@ -511,6 +511,32 @@ def _bls_stack(cfg):
     return df, [1.0] * len(df), thicknesses, source
 
 
+def _bls_bose_mu(cfg):
+    """Chemical potential (J) for the Bose-Einstein weighting.
+
+    The config carries the frequency-equivalent µ/h in Hz (default -1e12 Hz,
+    reproducing the SpinWaveToolkit example); convert to energy via µ = h·(µ/h).
+    """
+    return SWT.H * float(cfg.get("mu", -1e12))
+
+
+def _bls_guard_mu(model, cfg):
+    """Reject a chemical potential at/above the lowest magnon energy.
+
+    The Bose-Einstein factor 1/(exp((ħω − µ)/kB T) − 1) diverges as µ → ħω_min,
+    so µ/h must stay strictly below the lowest magnon frequency.
+    """
+    mu_hz = float(cfg.get("mu", -1e12))
+    w_min = float(np.min(np.real(model.GetDispersion(n=0))))
+    f_min = w_min / (2 * np.pi)
+    if mu_hz >= f_min:
+        raise ValueError(
+            f"Chemical potential µ/h = {mu_hz / 1e9:.4g} GHz must stay below the "
+            f"lowest magnon frequency ({f_min / 1e9:.4g} GHz); otherwise the "
+            f"Bose-Einstein occupation diverges. Lower the chemical potential."
+        )
+
+
 def _bls_thermal_bloch(cfg, w_common, kx, ky):
     """Vectorial thermal Bloch function (3, Nf, Nkx, Nky) from SingleLayer.
 
@@ -531,10 +557,12 @@ def _bls_thermal_bloch(cfg, w_common, kx, ky):
         d=cfg["d"],
         material=_make_material(cfg["material"]),
     )
+    _bls_guard_mu(model, cfg)
+    mu = _bls_bose_mu(cfg)
     b2 = np.zeros((nf, nk, nk), dtype=complex)
     for n in range(int(cfg.get("nModes", 2))):
         w, bf = model.GetBlochFunction(
-            n=n, Nf=nf, temp=cfg.get("temp", 300), mu=-1e12 * SWT.H
+            n=n, Nf=nf, temp=cfg.get("temp", 300), mu=mu
         )
         bf = bf.reshape(nf, nk, nk)
         # Interpolate all k points at once (the source axis w is shared) —

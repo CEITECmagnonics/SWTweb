@@ -7,6 +7,7 @@ import {
   BLS_SW_PARAMS,
   BLS_THERMAL_PARAMS,
   blsSweepableParams,
+  transposeSweepGrid,
 } from '../models/bls';
 import type { ParamDef } from '../models/types';
 import { generateBlsNotebook } from '../notebook/generateBlsNotebook';
@@ -14,6 +15,7 @@ import { useStore } from '../state/store';
 import { GenericParamField } from './GenericParamField';
 import { MaterialEditor } from './MaterialEditor';
 import { SimplePlot, type SimpleHeatmap, type SimpleSeries } from './SimplePlot';
+import { TraceListView, type TraceRow } from './TraceList';
 import { Button, FieldRow, inputClass, NumberInput, Section } from './ui';
 
 function BlsParamGroup({ defs, exclude = [] }: { defs: ParamDef[]; exclude?: string[] }) {
@@ -137,11 +139,15 @@ export function BlsPage() {
   const swtVersion = useStore((s) => s.swtVersion);
   const setBlsValue = useStore((s) => s.setBlsValue);
   const setBlsSweepKey = useStore((s) => s.setBlsSweepKey);
+  const updateBlsTrace = useStore((s) => s.updateBlsTrace);
+  const removeBlsTrace = useStore((s) => s.removeBlsTrace);
+  const clearBlsTraces = useStore((s) => s.clearBlsTraces);
   const isRT = String(bls.values.method ?? 'GF') === 'RT';
 
   const running = bls.status === 'running';
   const meta = bls.meta;
   const result = bls.result;
+  const traces = bls.traces;
 
   const { series, heatmap, xLabel, yLabel, title } = useMemo((): {
     series: SimpleSeries[];
@@ -150,40 +156,44 @@ export function BlsPage() {
     yLabel: string;
     title: string;
   } => {
-    if (!result || !meta) return { series: [], heatmap: null, xLabel: '', yLabel: '', title: '' };
-    const grid = result.grids[0];
-    if (grid && meta.paramToSI) {
+    const grid = result?.grids[0];
+    // Sweep mode → 2D map. Frequency goes on the vertical (y) axis and the
+    // swept parameter on the horizontal (x) axis, so transpose the stored grid
+    // (which is indexed [paramIndex][freqIndex]) to [freqIndex][paramIndex].
+    if (bls.sweepEnabled && grid && meta?.paramToSI) {
+      const freqGHz = grid.x.map((w) => w / (2 * Math.PI * 1e9));
+      const paramDisp = grid.y.map((v) => v / meta.paramToSI!);
+      const z = transposeSweepGrid(grid.z, freqGHz.length);
       return {
         series: [],
-        heatmap: {
-          x: grid.x.map((w) => w / (2 * Math.PI * 1e9)),
-          y: grid.y.map((v) => v / meta.paramToSI!),
-          z: grid.z,
-          colorLabel: 'BLS intensity (arb. u.)',
-        },
-        xLabel: 'Frequency f (GHz)',
-        yLabel: `${meta.paramLabel}${meta.paramUnit ? ` (${meta.paramUnit})` : ''}`,
+        heatmap: { x: paramDisp, y: freqGHz, z, colorLabel: 'BLS intensity (arb. u.)' },
+        xLabel: `${meta.paramLabel}${meta.paramUnit ? ` (${meta.paramUnit})` : ''}`,
+        yLabel: 'Frequency f (GHz)',
         title: `Thermal µBLS spectra vs ${meta.paramLabel}`,
       };
     }
-    const t = result.traces.find((x) => x.quantity === 'blsSpectrum');
+    // Non-sweep → one line per pinned single spectrum (overlaid traces).
     return {
-      series: t
-        ? [
-            {
-              name: 'BLS spectrum',
-              x: t.x.map((w) => w / (2 * Math.PI * 1e9)),
-              y: t.y,
-              color: '#2563eb',
-            },
-          ]
-        : [],
+      series: traces
+        .filter((t) => t.visible)
+        .map((t) => ({ name: t.runLabel, x: t.x, y: t.y, color: t.color, dash: t.dash })),
       heatmap: null,
       xLabel: 'Frequency f (GHz)',
       yLabel: 'BLS intensity (arb. u.)',
-      title: 'Thermal µBLS spectrum',
+      title: traces.length > 1 ? 'Thermal µBLS spectra' : 'Thermal µBLS spectrum',
     };
-  }, [result, meta]);
+  }, [result, meta, bls.sweepEnabled, traces]);
+
+  const traceRows: TraceRow[] = traces.map((t) => ({
+    id: t.id,
+    label: t.runLabel,
+    tooltip: `${t.runLabel}\n${Object.entries(t.paramsDisplay)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n')}`,
+    color: t.color,
+    dash: t.dash,
+    visible: t.visible,
+  }));
 
   const makeCsv = () => {
     if (!meta) return null;
@@ -193,7 +203,8 @@ export function BlsPage() {
     ];
     if (heatmap) {
       const lines = header.map((l) => `# ${l}`);
-      lines.push(`f (GHz),${yLabel},BLS intensity`);
+      // Columns follow the plot axes: swept parameter (x), frequency (y).
+      lines.push(`${xLabel},f (GHz),BLS intensity`);
       for (let iy = 0; iy < heatmap.y.length; iy++) {
         for (let ix = 0; ix < heatmap.x.length; ix++) {
           const v = heatmap.z[iy]?.[ix];
@@ -273,7 +284,7 @@ export function BlsPage() {
           </p>
         </Section>
         <Section title="Material">
-          <MaterialEditor which={1} />
+          <MaterialEditor which={1} excludeFields={['Ku']} />
         </Section>
         <Section title="Spin waves & sample">
           <BlsParamGroup defs={BLS_SW_PARAMS} exclude={['method']} />
@@ -333,8 +344,18 @@ export function BlsPage() {
           baseName="swtweb-bls-thermal"
           makeCsv={makeCsv}
           makeNotebook={makeNotebook}
-          emptyHint="Configure the sample, optics, and layer stack, then press Compute to model the thermal µBLS spectrum — optionally swept over a parameter into a 2D map."
+          emptyHint="Configure the sample, optics, and layer stack, then press Compute to model the thermal µBLS spectrum — optionally swept over a parameter into a 2D map. Each single-spectrum run is pinned as an overlaid trace."
         />
+        {!bls.sweepEnabled && traceRows.length > 0 && (
+          <div className="mt-4">
+            <TraceListView
+              rows={traceRows}
+              onUpdate={updateBlsTrace}
+              onRemove={removeBlsTrace}
+              onClear={clearBlsTraces}
+            />
+          </div>
+        )}
         {meta && (
           <p className="mt-3 text-center text-xs text-slate-400 dark:text-slate-500">
             µBLS thermal spectrum · {new Date(meta.timestamp).toLocaleString()}

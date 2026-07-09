@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BLS_ALL_PARAMS, blsSweepableParams } from '../bls';
+import { BLS_ALL_PARAMS, blsSweepableParams, transposeSweepGrid } from '../bls';
 import { blsDefaultSweepRange, buildBlsJob } from '../blsJob';
 import { getMaterialPreset } from '../materials';
 import type { ParamValues } from '../job';
@@ -29,6 +29,21 @@ describe('BLS definitions', () => {
       keys.add(p.key);
       expect(p.tooltip.length).toBeGreaterThan(0);
     }
+  });
+
+  it('transposes a sweep grid from [param][freq] to [freq][param]', () => {
+    // 2 sweep points × 3 frequencies: z[paramIndex][freqIndex].
+    const stored = [
+      [1, 2, 3],
+      [4, 5, 6],
+    ];
+    expect(transposeSweepGrid(stored, 3)).toEqual([
+      [1, 4],
+      [2, 5],
+      [3, 6],
+    ]);
+    // Missing values become explicit nulls so the plot renders gaps.
+    expect(transposeSweepGrid([[1, null, 3]], 3)).toEqual([[1], [null], [3]]);
   });
 
   it('exposes the sweepable parameters with ranges', () => {
@@ -63,6 +78,21 @@ describe('buildBlsJob', () => {
     expect(job.optics.analyzerAngle).toBe(90);
     expect(Number(job.optics.collectionSpot)).toBeCloseTo(1e-6);
     expect(job.sweep).toBeUndefined();
+    expect((job.config.material as typeof material).Ms).toBeCloseTo(800e3);
+  });
+
+  it('threads the chemical potential to SI (µ/h in Hz) with the example default', () => {
+    // Default µ/h = −1000 GHz reproduces the SpinWaveToolkit example (−1e12 Hz).
+    expect(buildBlsJob(input()).config.mu).toBe(-1e12);
+    const custom = buildBlsJob(input({ values: { ...defaults, mu: 3 } }));
+    expect(custom.config.mu).toBeCloseTo(3e9);
+  });
+
+  it('drops the unused Ku from the BLS material', () => {
+    const job = buildBlsJob(
+      input({ material: { ...material, Ku: 1.5e-3 } }),
+    );
+    expect('Ku' in (job.config.material as object)).toBe(false);
     expect((job.config.material as typeof material).Ms).toBeCloseTo(800e3);
   });
 
