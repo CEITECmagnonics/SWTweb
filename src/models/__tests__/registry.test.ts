@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MODEL_LIST } from '../registry';
+import { getModel, MODEL_LIST } from '../registry';
 import { buildJob } from '../job';
 import { getMaterialPreset } from '../materials';
 
@@ -51,6 +51,39 @@ describe('model registry', () => {
           `${model.id}.${q.id} kwarg ${name}`,
         ).toBe(true);
       }
+    }
+  });
+
+  it('restricts SingleLayerNumeric to the only implemented boundary condition', () => {
+    // SWT 1.3.0's Tacchi solver raises for BC 2-4 with N >= 2 modes.
+    const numeric = getModel('SingleLayerNumeric');
+    const bc = numeric.params.find((p) => p.key === 'boundary_cond');
+    expect(bc?.choices?.map((c) => c.value)).toEqual([1]);
+    expect(numeric.params.some((p) => p.key === 'dp')).toBe(false);
+    // The analytical model keeps all four (they all work there).
+    const analytic = getModel('SingleLayer');
+    expect(analytic.params.find((p) => p.key === 'boundary_cond')?.choices).toHaveLength(4);
+  });
+
+  it('classifies parallel-pumping quantities as k-dependent arrays', () => {
+    // GetCouplingParam/GetThresholdField return arrays over kxi; the former
+    // 'scalar' classification crashed float() in the bridge.
+    const q = getModel('SingleLayer').quantities;
+    expect(q.find((x) => x.id === 'couplingParam')?.returns).toBe('array');
+    expect(q.find((x) => x.id === 'thresholdField')?.returns).toBe('array');
+  });
+
+  it('exposes optional field angles and Bloch thermal weighting', () => {
+    const sl = getModel('SingleLayer');
+    for (const key of ['theta_H', 'phi_H']) {
+      const p = sl.params.find((x) => x.key === key);
+      expect(p?.nullable).toBe(true);
+      expect(p?.nullBehavior).toBe('omit');
+    }
+    for (const id of ['SingleLayer', 'SingleLayerNumeric', 'DoubleLayerNumeric'] as const) {
+      const m = getModel(id);
+      expect(m.methodParams?.some((p) => p.key === 'temp')).toBe(true);
+      expect(m.quantities.find((q2) => q2.id === 'blochFunction')?.kwargNames).toContain('temp');
     }
   });
 

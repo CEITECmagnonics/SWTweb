@@ -59,6 +59,9 @@ describe('buildBlsJob', () => {
     expect(job.config.epsSubIm).toBeCloseTo(0.43004);
     expect(job.optics.NA).toBeCloseTo(0.75);
     expect(job.optics.wavelength).toBeCloseTo(532e-9);
+    expect(job.optics.analyzer).toBe('none');
+    expect(job.optics.analyzerAngle).toBe(90);
+    expect(Number(job.optics.collectionSpot)).toBeCloseTo(1e-6);
     expect(job.sweep).toBeUndefined();
     expect((job.config.material as typeof material).Ms).toBeCloseTo(800e3);
   });

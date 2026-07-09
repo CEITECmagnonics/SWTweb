@@ -1,5 +1,5 @@
 /** Small shared UI primitives. */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import katex from 'katex';
 
 export function Formula({ latex, display = false }: { latex: string; display?: boolean }) {
@@ -103,26 +103,67 @@ export function NumberInput({
   step?: number;
   nullable?: boolean;
 }) {
+  // Draft holds the raw text while the user edits: clearing a required field
+  // no longer commits null (nor silently reverts on unrelated re-renders);
+  // on blur the field re-syncs to the committed value.
+  const [draft, setDraft] = useState<string | null>(null);
   return (
     <input
       type="number"
       className={inputClass}
-      value={value ?? ''}
+      value={draft ?? (value ?? '')}
       placeholder={placeholder}
       min={min}
       max={max}
       step={step ?? 'any'}
       onChange={(e) => {
         const raw = e.target.value;
+        setDraft(raw);
         if (raw === '') {
-          onChange(nullable ? null : null);
+          if (nullable) onChange(null);
           return;
         }
         const num = Number(raw);
         if (Number.isFinite(num)) onChange(num);
       }}
+      onBlur={() => setDraft(null)}
     />
   );
+}
+
+/** Shared toast + error-guard used by the export bars and share button. */
+export function useFlash(): {
+  message: string | null;
+  flash: (text: string) => void;
+  guard: (fn: () => Promise<void> | void) => Promise<void>;
+} {
+  const [message, setMessage] = useState<string | null>(null);
+  const timeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const flash = (text: string) => {
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current);
+    setMessage(text);
+    timeoutRef.current = window.setTimeout(() => {
+      setMessage(null);
+      timeoutRef.current = null;
+    }, 2500);
+  };
+
+  const guard = async (fn: () => Promise<void> | void) => {
+    try {
+      await fn();
+    } catch (err) {
+      flash(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return { message, flash, guard };
 }
 
 export function Button({

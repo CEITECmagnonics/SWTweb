@@ -235,7 +235,7 @@ export interface HystResult {
 export interface BlsJob {
   task: 'thermal';
   config: Record<string, number | string | MaterialValues>;
-  optics: Record<string, number>;
+  optics: Record<string, number | string>;
   sweep?: { key: string; values: number[] };
 }
 

@@ -51,7 +51,7 @@ export function buildBlsJob(input: BlsInput): BlsJob {
     ...convertGroup(BLS_SW_PARAMS, input.values),
     ...convertGroup(BLS_STACK_PARAMS, input.values),
   };
-  const optics = convertGroup(BLS_OPTICS_PARAMS, input.values) as Record<string, number>;
+  const optics = convertGroup(BLS_OPTICS_PARAMS, input.values);
 
   // thermal
   const thermal = convertGroup(BLS_THERMAL_PARAMS, input.values);

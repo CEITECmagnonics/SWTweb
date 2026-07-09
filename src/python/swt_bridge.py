@@ -30,6 +30,8 @@ def _simpson_compat(y, x=None, *args, **kwargs):
 _scipy_integrate.simpson = _simpson_compat
 # ---------------------------------------------------------------------------
 
+from scipy.interpolate import interp1d
+
 import SpinWaveToolkit as SWT
 
 
@@ -135,6 +137,10 @@ def run_job(job_json):
 
         elif returns == "grid":
             grid_kwargs = dict(kwargs)
+            # SWT applies the Bose-Einstein weighting only when BOTH temp and
+            # mu are given; fill the library-example default mu if omitted.
+            if "temp" in grid_kwargs and "mu" not in grid_kwargs:
+                grid_kwargs["mu"] = -1e12 * SWT.H
             if mode_arg == "n_nT":
                 grid_kwargs.update(n=modes[0], nT=n_transverse)
             elif mode_arg == "n":
@@ -531,9 +537,13 @@ def _bls_thermal_bloch(cfg, w_common, kx, ky):
             n=n, Nf=nf, temp=cfg.get("temp", 300), mu=-1e12 * SWT.H
         )
         bf = bf.reshape(nf, nk, nk)
-        for i in range(nk):
-            for j in range(nk):
-                b2[:, i, j] += np.interp(w_common, w, bf[:, i, j], left=0, right=0)
+        # Interpolate all k points at once (the source axis w is shared) —
+        # the per-pixel np.interp loop is an O(nK²) Python-level bottleneck
+        # in single-threaded Pyodide.
+        interp = interp1d(
+            w, bf, axis=0, bounds_error=False, fill_value=0.0, assume_sorted=True
+        )
+        b2 += interp(w_common)
     return np.array([b2, np.zeros_like(b2), 1j * b2])
 
 
@@ -563,7 +573,8 @@ def _bls_auto_frange(cfg, kmax, optics):
 def _bls_thermal_sigma(cfg, optics, exy, e_field):
     """One thermal µBLS spectrum; returns (w_common, |sigma|)."""
     kmax = cfg["kMax"]
-    nk = int(cfg.get("nK", 64))
+    # fallbacks mirror the UI defaults in src/models/bls.ts
+    nk = int(cfg.get("nK", 48))
     nf = int(cfg.get("nF", 61))
     if cfg.get("fAuto", True):
         wmin, wmax = _bls_auto_frange(cfg, kmax, optics)
@@ -585,9 +596,12 @@ def _bls_thermal_sigma(cfg, optics, exy, e_field):
         PM=pm,
         d=thicknesses,
         NA=optics["NA"],
-        Nq=int(cfg.get("nQ", 30)),
+        Nq=int(cfg.get("nQ", 28)),
         source_layer_index=source,
         wavelength=optics["wavelength"],
+        collectionSpot=optics.get("collectionSpot", 1e-6),
+        output_analyzer=optics.get("analyzer", "none"),
+        output_analyzer_angle_deg=optics.get("analyzerAngle", 0),
     )
     return w_common, np.abs(np.asarray(sigma, dtype=complex))
 

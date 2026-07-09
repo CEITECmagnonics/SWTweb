@@ -64,10 +64,16 @@ function macrospinConstruction(job: SweepJob): string {
 
 function generateMacrospinSweep(nb: NotebookBuilder, input: SweepNotebookInput): void {
   const { job, meta } = input;
+  const cfg = job.config!;
   const values = job.sweep.values;
+  // Ku sweeps re-register the anisotropy with the configured axis angles
+  // (same as the bridge) — never derive them from maceq.anis, which may not
+  // exist yet when the sweep starts at Ku = 0.
+  const aniBase = meta.key.replace(/_Ku$/, '');
   const apply =
     MACROSPIN_APPLY[meta.key] ??
-    `maceq.add_uniaxial_anisotropy("${meta.key.replace(/_Ku$/, '')}", Ku=value, theta=maceq.anis["${meta.key.replace(/_Ku$/, '')}"]["theta"] if "${meta.key.replace(/_Ku$/, '')}" in maceq.anis else 0, phi=0)`;
+    `maceq.add_uniaxial_anisotropy("${aniBase}", Ku=value, ` +
+      `theta=${py(Number(cfg[`${aniBase}_theta`] ?? 0))}, phi=${py(Number(cfg[`${aniBase}_phi`] ?? 0))})`;
 
   nb.code(macrospinConstruction(job));
   nb.code(`# Swept parameter: ${meta.paramLabel} (SI values)
@@ -149,12 +155,22 @@ function generateModelSweep(nb: NotebookBuilder, input: SweepNotebookInput): voi
   const relax = Boolean(job.relax);
   const isMap = job.mode === 'map';
   const conv = q.nbConvert ?? (q.scale !== 1 ? ` * ${q.scale}  # -> ${q.unit}` : '');
-  const kwargs = jq.kwargNames
+  // Swept method-only kwargs (e.g. SC-coupled tol/d_is) never appear in the
+  // constructor — they must be substituted with `value` in each Get* call.
+  const sweptInMethod = job.sweep.key in (job.methodKwargs ?? {});
+  const kwargEntries = jq.kwargNames
     ? Object.entries(job.methodKwargs ?? {})
         .filter(([k]) => jq.kwargNames!.includes(k))
-        .map(([k, v]) => `${k}=${py(v)}`)
-        .join(', ')
-    : '';
+        .map(([k, v]) => `${k}=${sweptInMethod && k === job.sweep.key ? 'value' : py(v)}`)
+    : [];
+  if (
+    sweptInMethod &&
+    jq.kwargNames?.includes(job.sweep.key) &&
+    !kwargEntries.some((e) => e.startsWith(`${job.sweep.key}=`))
+  ) {
+    kwargEntries.push(`${job.sweep.key}=value`);
+  }
+  const kwargs = kwargEntries.join(', ');
 
   // Constructor arguments: swept key -> `value`; phiInit handled by relaxation.
   const ctorArgs: string[] = ['material=material', 'kxi=kxi'];
@@ -163,7 +179,9 @@ function generateModelSweep(nb: NotebookBuilder, input: SweepNotebookInput): voi
     if (key === job.sweep.key) continue;
     ctorArgs.push(`${key}=${py(value)},`);
   }
-  ctorArgs.push(`${job.sweep.key}=value,  # swept: ${meta.paramLabel}`);
+  if (!sweptInMethod) {
+    ctorArgs.push(`${job.sweep.key}=value,  # swept: ${meta.paramLabel}`);
+  }
   if (job.material2) ctorArgs.push('material2=material2,');
   if (relax) {
     ctorArgs.push('phiInit1=phi_init[0],  # warm start from previous step (relaxation)');
@@ -206,35 +224,44 @@ plt.show()`);
     return;
   }
 
-  // Full dispersion map
-  const modeIdx = (job.modes ?? [0])[0];
-  const rowExpr =
+  // Full dispersion map — one heatmap per mode, matching the app: stacked
+  // returns produce every row, per-mode methods loop the selected modes.
+  const isStacked = q.returns === 'stacked' || q.returns === 'tuple_stacked';
+  const stackedCall =
     q.returns === 'tuple_stacked'
-      ? `np.atleast_2d(model.${q.method}()[0])[${modeIdx}]`
-      : q.returns === 'stacked'
-        ? `np.atleast_2d(model.${q.method}())[${modeIdx}]`
-        : jq.modeArg === 'n_nT'
-          ? `model.${q.method}(n=${modeIdx}, nT=${job.nT ?? 0})`
-          : jq.modeArg === 'n'
-            ? `model.${q.method}(n=${modeIdx})`
-            : `model.${q.method}(${kwargs})`;
+      ? `np.atleast_2d(model.${q.method}()[0])`
+      : `np.atleast_2d(model.${q.method}())`;
+  const modeCall =
+    jq.modeArg === 'n_nT'
+      ? `model.${q.method}(n=m, nT=${job.nT ?? 0})`
+      : jq.modeArg === 'n'
+        ? `model.${q.method}(n=m)`
+        : `model.${q.method}(${kwargs})`;
+  const collect = isStacked
+    ? `    rows = np.real(${stackedCall})
+    for m in range(rows.shape[0]):
+        zmaps.setdefault(m, []).append(rows[m])`
+    : `    for m in modes:
+        zmaps.setdefault(m, []).append(np.real(${modeCall}))`;
   nb.code(`# Swept parameter: ${meta.paramLabel} (SI values)
 sweep_values = np.linspace(${py(values[0])}, ${py(values[values.length - 1])}, ${values.length})
 sweep_display = sweep_values * ${py(1 / meta.paramToSI)}  # ${meta.paramUnit || 'SI'}
 ${kSetup}${relaxSetup}
 
-zmap = []
+modes = ${JSON.stringify(jq.modeArg ? (job.modes ?? [0]) : [0])}
+zmaps = {}
 for value in sweep_values:
     ${ctor.split('\n').join('\n    ')}${relaxStep}
-    zmap.append(np.real(${rowExpr}))
-zmap = np.array(zmap)${conv}`);
-  nb.code(`fig, ax = plt.subplots()
-pcm = ax.pcolormesh(kxi * 1e-6, sweep_display, zmap, shading="auto", cmap="viridis")
-fig.colorbar(pcm, ax=ax, label="${q.axisLabel}")
-ax.set_xlabel("Wavenumber k (rad/µm)")
-ax.set_ylabel("${meta.paramLabel}${meta.paramUnit ? ` (${meta.paramUnit})` : ''}")
-ax.set_title("${q.label} — mode ${modeIdx}")
-plt.show()`);
+${collect}`);
+  nb.code(`for m, zrows in zmaps.items():
+    zmap = np.array(zrows)${conv}
+    fig, ax = plt.subplots()
+    pcm = ax.pcolormesh(kxi * 1e-6, sweep_display, zmap, shading="auto", cmap="viridis")
+    fig.colorbar(pcm, ax=ax, label="${q.axisLabel}")
+    ax.set_xlabel("Wavenumber k (rad/µm)")
+    ax.set_ylabel("${meta.paramLabel}${meta.paramUnit ? ` (${meta.paramUnit})` : ''}")
+    ax.set_title(f"${q.label} — mode {m}")
+    plt.show()`);
 }
 
 export function generateSweepNotebook(input: SweepNotebookInput): string {

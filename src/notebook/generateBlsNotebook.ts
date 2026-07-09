@@ -82,11 +82,17 @@ for n in range(${py(num(c.nModes, 2))}):
 Bloch3 = np.array([Bloch2D, np.zeros_like(Bloch2D), 1j * Bloch2D])`;
 }
 
-const SIGMA_CALL = `sigma = SWT.bls.get_signal_GF_focal(
+function sigmaCall(job: BlsJob): string {
+  const o = job.optics;
+  return `sigma = SWT.bls.get_signal_GF_focal(
     SweepBloch=w_common, KxKyBloch=[kx_grid, ky_grid], Bloch=Bloch3,
     Exy=Exy, E=E, DF=DF, PM=PM, d=thicknesses, NA=NA_current,
     Nq=Nq, source_layer_index=source_layer, wavelength=wavelength_current,
+    collectionSpot=${py(num(o.collectionSpot, 1e-6))},
+    output_analyzer="${String(o.analyzer ?? 'none')}",
+    output_analyzer_angle_deg=${py(num(o.analyzerAngle, 0))},
 )`;
+}
 
 function thermalCells(nb: NotebookBuilder, input: BlsNotebookInput): void {
   const { job } = input;
@@ -119,7 +125,7 @@ f_max = 1.1 * max(fmaxs) / (2 * np.pi)`
   if (!job.sweep) {
     nb.code(thermalBlochCell(job));
     nb.code(`# BLS spectrum via the Green-function formalism (Eq. (27), thermal magnons)
-${SIGMA_CALL}`);
+${sigmaCall(job)}`);
     nb.code(`fig, ax = plt.subplots()
 ax.plot(w_common / 2 / np.pi / 1e9, np.abs(sigma))
 ax.set_xlabel("Frequency (GHz)")
@@ -169,7 +175,7 @@ ${
             for j in range(Nk):
                 Bloch2D[:, i, j] += np.interp(w_common, w, bf[:, i, j], left=0, right=0)
     Bloch3 = np.array([Bloch2D, np.zeros_like(Bloch2D), 1j * Bloch2D])
-    ${SIGMA_CALL.split('\n').join('\n    ')}
+    ${sigmaCall(job).split('\n').join('\n    ')}
     spectra.append(np.abs(sigma))
 spectra = np.array(spectra)`);
   nb.code(`fig, ax = plt.subplots()

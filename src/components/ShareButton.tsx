@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { buildShareUrl, type ShareScope } from '../share/urlState';
 import { useStore } from '../state/store';
-import { Button } from './ui';
+import { Button, useFlash } from './ui';
 
 export function ShareButton({
   scope,
@@ -10,12 +9,7 @@ export function ShareButton({
   scope: ShareScope;
   className?: string;
 }) {
-  const [message, setMessage] = useState<string | null>(null);
-
-  const flash = (text: string) => {
-    setMessage(text);
-    window.setTimeout(() => setMessage(null), 2500);
-  };
+  const { message, flash } = useFlash();
 
   const copyLink = async () => {
     const url = buildShareUrl(useStore.getState(), scope);
