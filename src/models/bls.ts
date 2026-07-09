@@ -11,6 +11,20 @@ export type BlsMode = 'thermal';
 /** Spin-wave / sample parameters (bridge `config`, SI after conversion). */
 export const BLS_SW_PARAMS: ParamDef[] = [
   {
+    key: 'method',
+    label: 'Method',
+    unit: '',
+    toSI: 1,
+    default: 'GF',
+    kind: 'choice',
+    choices: [
+      { value: 'GF', label: 'Green function (full optical stack)' },
+      { value: 'RT', label: 'Reciprocity theorem (fast, no stack)' },
+    ],
+    tooltip:
+      'Scattering model. Green function: propagates through the full air / [cover] / magnet / substrate dielectric stack and applies the output analyzer; slower (runtime ∝ Nq⁴). Reciprocity theorem: ~10× faster, but ignores the entire dielectric stack — including the substrate permittivity — and the analyzer / collection optics. Peak positions agree with the Green-function result.',
+  },
+  {
     key: 'Bext',
     label: 'External field',
     symbol: 'B_\\mathrm{ext}',

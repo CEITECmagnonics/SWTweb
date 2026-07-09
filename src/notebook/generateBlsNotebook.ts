@@ -52,8 +52,11 @@ E = [Ex, Ey, Ez]
 Exy = [x, y]`;
 }
 
-function thermalBlochCell(job: BlsJob): string {
+function thermalBlochCell(job: BlsJob, withBloch3 = true): string {
   const c = job.config;
+  const tail = withBloch3
+    ? '\nBloch3 = np.array([Bloch2D, np.zeros_like(Bloch2D), 1j * Bloch2D])'
+    : '';
   return `# Thermal Bloch function on a 2D (kx, ky) grid from the Kalinikos-Slavin
 # model, with Bose-Einstein weighting. Composition [B, 0, iB] follows the
 # official SpinWaveToolkit BLS example.
@@ -78,8 +81,26 @@ for n in range(${py(num(c.nModes, 2))}):
     bf = bf.reshape(Nf, Nk, Nk)
     for i in range(Nk):
         for j in range(Nk):
-            Bloch2D[:, i, j] += np.interp(w_common, w, bf[:, i, j], left=0, right=0)
-Bloch3 = np.array([Bloch2D, np.zeros_like(Bloch2D), 1j * Bloch2D])`;
+            Bloch2D[:, i, j] += np.interp(w_common, w, bf[:, i, j], left=0, right=0)${tail}`;
+}
+
+function focalRtEjCell(): string {
+  return `# Detector-side field for the reciprocity theorem: the incident focal
+# field rotated by 90 deg (crossed-polarization detection).
+Ej = SWT.rotate_field(E, x, y, 90)`;
+}
+
+function chiCell(): string {
+  return `# Magneto-optic susceptibility tensor from the thermal Bloch function.
+# Composition [B, 0, -iB] follows the official SpinWaveToolkit RT example.
+Chi = SWT.bls.susceptibilities.mo_linear([Bloch2D, np.zeros_like(Bloch2D), -1j * Bloch2D])`;
+}
+
+function sigmaRtCall(): string {
+  return `sigma, _ = SWT.bls.get_signal_RT_focal(
+    Exy=Exy, Ei_fields=E, Ej_fields=Ej, KxKyChi=[kx_grid, ky_grid],
+    Chi=Chi, coherent_exc=False,
+)`;
 }
 
 function sigmaCall(job: BlsJob): string {
@@ -98,13 +119,20 @@ function thermalCells(nb: NotebookBuilder, input: BlsNotebookInput): void {
   const { job } = input;
   const c = job.config;
   const auto = Number(c.fAuto ?? 1) === 1;
+  const isRT = String(c.method ?? 'GF') === 'RT';
+  const nqLine = isRT
+    ? ''
+    : `Nq = ${py(num(c.nQ, 28))}  # q-space half-resolution (runtime ∝ Nq^4)\n`;
 
   nb.code(focalCell(job));
-  nb.code(stackCells(job));
+  if (isRT) {
+    nb.code(focalRtEjCell());
+  } else {
+    nb.code(stackCells(job));
+  }
   nb.code(`NA_current = ${py(job.optics.NA)}
 wavelength_current = ${py(job.optics.wavelength)}
-Nq = ${py(num(c.nQ, 28))}  # q-space half-resolution (runtime ∝ Nq^4)
-${
+${nqLine}${
   auto
     ? `# Automatic frequency window covering the detectable modes
 f_min, f_max = ${py(num(c.fMin, 2e9))}, ${py(num(c.fMax, 20e9))}  # replaced below
@@ -123,9 +151,16 @@ f_max = 1.1 * max(fmaxs) / (2 * np.pi)`
 }`);
 
   if (!job.sweep) {
-    nb.code(thermalBlochCell(job));
-    nb.code(`# BLS spectrum via the Green-function formalism (Eq. (27), thermal magnons)
+    if (isRT) {
+      nb.code(thermalBlochCell(job, false));
+      nb.code(chiCell());
+      nb.code(`# BLS spectrum via the reciprocity theorem (thermal magnons)
+${sigmaRtCall()}`);
+    } else {
+      nb.code(thermalBlochCell(job));
+      nb.code(`# BLS spectrum via the Green-function formalism (Eq. (27), thermal magnons)
 ${sigmaCall(job)}`);
+    }
     nb.code(`fig, ax = plt.subplots()
 ax.plot(w_common / 2 / np.pi / 1e9, np.abs(sigma))
 ax.set_xlabel("Frequency (GHz)")
@@ -149,7 +184,41 @@ plt.show()`);
   const coverLine =
     key === 'dCover' ? `    thicknesses[0] = value  # swept cover thickness\n` : '';
 
-  nb.code(`sweep_values = np.array(${JSON.stringify(job.sweep.values)})  # SI
+  if (isRT) {
+    const opticsRecompute = opticsSwept
+      ? `    objective = SWT.bls.ObjectiveLens(NA=NA_current, wavelength=wavelength_current, f0=${py(job.optics.f0 ?? 10)}, f=1e-3)
+    x, y, Ex, Ey, Ez = objective.getFocalField(z=0, rho_max=${py(job.optics.rhoMax ?? 10e-6)}, N=${py(job.optics.focalN ?? 201)})
+    E = [Ex, Ey, Ez]; Exy = [x, y]
+    Ej = SWT.rotate_field(E, x, y, 90)
+`
+      : '';
+    nb.code(`sweep_values = np.array(${JSON.stringify(job.sweep.values)})  # SI
+spectra = []
+for value in sweep_values:
+    ${applyLine}
+${opticsRecompute}    Nk = ${py(num(c.nK, 48))}; Nf = ${py(num(c.nF, 61))}; k_max = ${py(num(c.kMax, 15e6))}
+    kx_grid = np.linspace(-k_max, k_max, Nk); ky_grid = kx_grid.copy()
+    kx_safe = kx_grid.copy(); kx_safe[np.abs(kx_safe) < 1e-6] = 1e-6
+    KX, KY = np.meshgrid(kx_safe, ky_grid, indexing="ij")
+    model = SWT.SingleLayer(Bext=${modelBext}, kxi=np.hypot(KX, KY).flatten(), theta=np.pi / 2,
+                            phi=np.arctan2(KY, KX).flatten(), d=${modelD}, material=material)
+    w_common = np.linspace(f_min, f_max, Nf) * 2 * np.pi
+    Bloch2D = np.zeros((Nf, Nk, Nk), dtype=complex)
+    for n in range(${py(num(c.nModes, 2))}):
+        w, bf = model.GetBlochFunction(n=n, Nf=Nf, temp=${tempExpr}, mu=-1e12 * SWT.H)
+        bf = bf.reshape(Nf, Nk, Nk)
+        for i in range(Nk):
+            for j in range(Nk):
+                Bloch2D[:, i, j] += np.interp(w_common, w, bf[:, i, j], left=0, right=0)
+    Chi = SWT.bls.susceptibilities.mo_linear([Bloch2D, np.zeros_like(Bloch2D), -1j * Bloch2D])
+    sigma, _ = SWT.bls.get_signal_RT_focal(
+        Exy=Exy, Ei_fields=E, Ej_fields=Ej, KxKyChi=[kx_grid, ky_grid],
+        Chi=Chi, coherent_exc=False,
+    )
+    spectra.append(np.abs(sigma))
+spectra = np.array(spectra)`);
+  } else {
+    nb.code(`sweep_values = np.array(${JSON.stringify(job.sweep.values)})  # SI
 spectra = []
 for value in sweep_values:
     ${applyLine}
@@ -178,6 +247,7 @@ ${
     ${sigmaCall(job).split('\n').join('\n    ')}
     spectra.append(np.abs(sigma))
 spectra = np.array(spectra)`);
+  }
   nb.code(`fig, ax = plt.subplots()
 pcm = ax.pcolormesh(w_common / 2 / np.pi / 1e9, sweep_values, spectra, shading="auto", cmap="viridis")
 fig.colorbar(pcm, ax=ax, label="BLS intensity (arb. u.)")

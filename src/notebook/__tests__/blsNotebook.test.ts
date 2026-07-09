@@ -73,6 +73,61 @@ describe('generateBlsNotebook', () => {
     expect(nb).toContain('pcolormesh');
   });
 
+  it('produces an RT notebook without the dielectric stack or analyzer', () => {
+    const job = buildBlsJob({
+      mode: 'thermal',
+      material,
+      values: { ...defaults, method: 'RT' },
+      sweepEnabled: false,
+      sweepKey: 'Bext',
+      sweepFrom: 0,
+      sweepTo: 0,
+      sweepPoints: 2,
+    });
+    const nb = generateBlsNotebook({
+      job,
+      meta: makeMeta(job),
+      materialPresetId: 'NiFe',
+      swtVersion: '1.3.0',
+    });
+    expect(() => JSON.parse(nb)).not.toThrow();
+    expect(nb).toContain('get_signal_RT_focal');
+    expect(nb).toContain('mo_linear');
+    expect(nb).toContain('rotate_field');
+    expect(nb).not.toContain('DF = [');
+    expect(nb).not.toContain('output_analyzer');
+    expect(nb).not.toContain('get_signal_GF_focal');
+  });
+
+  it('produces a swept RT notebook that is valid JSON', () => {
+    const job = buildBlsJob({
+      mode: 'thermal',
+      material,
+      values: { ...defaults, method: 'RT' },
+      sweepEnabled: true,
+      sweepKey: 'Bext',
+      sweepFrom: 10,
+      sweepTo: 100,
+      sweepPoints: 4,
+    });
+    const nb = generateBlsNotebook({
+      job,
+      meta: makeMeta(job, {
+        sweepKey: 'Bext',
+        paramLabel: 'External field',
+        paramUnit: 'mT',
+        paramToSI: 1e-3,
+      }),
+      materialPresetId: 'NiFe',
+      swtVersion: '1.3.0',
+    });
+    expect(() => JSON.parse(nb)).not.toThrow();
+    expect(nb).toContain('get_signal_RT_focal');
+    expect(nb).toContain('mo_linear');
+    expect(nb).toContain('pcolormesh');
+    expect(nb).not.toContain('DF = [');
+  });
+
   it('includes the cover layer stack when enabled', () => {
     const job = buildBlsJob({
       mode: 'thermal',
