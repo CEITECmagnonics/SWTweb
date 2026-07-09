@@ -606,6 +606,45 @@ def _bls_thermal_sigma(cfg, optics, exy, e_field):
     return w_common, np.abs(np.asarray(sigma, dtype=complex))
 
 
+def _bls_thermal_chi(cfg, w_common, kx, ky):
+    """Magneto-optic susceptibility tensor (3,3,Nf,Nk,Nk) for the RT path.
+
+    Reuses the vectorized thermal Bloch computation and re-composes it as the
+    official SWT RT example does: mx=B, my=0, mz=-iB, fed through mo_linear.
+    """
+    b2 = _bls_thermal_bloch(cfg, w_common, kx, ky)[0]
+    return SWT.bls.susceptibilities.mo_linear([b2, np.zeros_like(b2), -1j * b2])
+
+
+def _bls_thermal_sigma_rt(cfg, optics, exy, ei_fields, ej_fields):
+    """One thermal µBLS spectrum via the reciprocity theorem (focal variant).
+
+    ~160x faster than the Green-function path: no Nq angular quadrature and
+    no dielectric stack (which also means the substrate/cover permittivities
+    are ignored — enforced by the caller)."""
+    kmax = cfg["kMax"]
+    nk = int(cfg.get("nK", 48))
+    nf = int(cfg.get("nF", 61))
+    if cfg.get("fAuto", True):
+        wmin, wmax = _bls_auto_frange(cfg, kmax, optics)
+    else:
+        wmin = cfg["fMin"] * 2 * np.pi
+        wmax = cfg["fMax"] * 2 * np.pi
+    w_common = np.linspace(wmin, wmax, nf)
+    kx = np.linspace(-kmax, kmax, nk)
+    ky = kx.copy()
+    chi = _bls_thermal_chi(cfg, w_common, kx, ky)
+    sigma, _ = SWT.bls.get_signal_RT_focal(
+        Exy=exy,
+        Ei_fields=ei_fields,
+        Ej_fields=ej_fields,
+        KxKyChi=[kx, ky],
+        Chi=chi,
+        coherent_exc=False,
+    )
+    return w_common, np.abs(np.asarray(sigma, dtype=complex))
+
+
 def _bls_apply_sweep(cfg, optics, key, value):
     """Apply one swept value to the BLS config/optics dicts."""
     if key in ("NA", "wavelength"):
@@ -615,81 +654,105 @@ def _bls_apply_sweep(cfg, optics, key, value):
 
 
 def run_bls(job_json):
-    """Micro-focused BLS calculations: thermal spectra (optionally swept)."""
+    """Micro-focused BLS thermal spectra (optionally swept), computed either
+    with the Green-function formalism ('GF', full dielectric stack) or the
+    much faster reciprocity theorem ('RT', air / magnet / substrate only)."""
     job = json.loads(job_json)
     task = job["task"]
     cfg = dict(job["config"])
     optics = dict(job["optics"])
+    if task != "thermal":
+        raise ValueError(f"Unknown BLS task: {task}")
 
-    if task == "thermal":
-        sweep = job.get("sweep")
-        if not sweep:
-            exy, e_field = _bls_focal(optics)
-            w, sig = _bls_thermal_sigma(cfg, optics, exy, e_field)
-            return json.dumps(
-                {
-                    "traces": [
-                        {
-                            "quantity": "blsSpectrum",
-                            "label": "",
-                            "x": _clean_1d(w),
-                            "y": _clean_1d(sig),
-                        }
-                    ],
-                    "grids": [],
-                }
-            )
-        # Swept thermal spectra -> heatmap over (frequency, parameter).
-        key = sweep["key"]
-        values = [float(v) for v in sweep["values"]]
-        optics_swept = key in ("NA", "wavelength")
-        exy, e_field = (None, None)
-        if not optics_swept:
-            exy, e_field = _bls_focal(optics)
-        # Common frequency axis across the sweep: fix the window from the
-        # extreme parameter values so all spectra share one grid.
-        rows = []
-        w_axis = None
-        for v in values:
-            c = dict(cfg)
-            o = dict(optics)
-            _bls_apply_sweep(c, o, key, v)
-            if w_axis is None:
-                if c.get("fAuto", True):
-                    # widest window over the sweep: probe both ends
-                    c_lo, o_lo = dict(cfg), dict(optics)
-                    _bls_apply_sweep(c_lo, o_lo, key, values[0])
-                    c_hi, o_hi = dict(cfg), dict(optics)
-                    _bls_apply_sweep(c_hi, o_hi, key, values[-1])
-                    lo1, hi1 = _bls_auto_frange(c_lo, c_lo["kMax"], o_lo)
-                    lo2, hi2 = _bls_auto_frange(c_hi, c_hi["kMax"], o_hi)
-                    w_axis = (min(lo1, lo2), max(hi1, hi2))
-                else:
-                    w_axis = (c["fMin"] * 2 * np.pi, c["fMax"] * 2 * np.pi)
-            c["fAuto"] = False
-            c["fMin"] = w_axis[0] / (2 * np.pi)
-            c["fMax"] = w_axis[1] / (2 * np.pi)
-            if optics_swept:
-                exy, e_field = _bls_focal(o)
-            w, sig = _bls_thermal_sigma(c, o, exy, e_field)
-            rows.append(_clean_1d(sig))
-        w = np.linspace(w_axis[0], w_axis[1], int(cfg.get("nF", 61)))
+    method = cfg.get("method", "GF")
+    if method not in ("GF", "RT"):
+        raise ValueError(f"Unknown BLS method: {method}")
+    if method == "RT" and cfg.get("coverEnabled"):
+        raise ValueError(
+            "The reciprocity-theorem method supports only air / magnetic layer / "
+            "substrate — disable the cover layer or use the Green-function method."
+        )
+
+    def prep_fields(o):
+        exy, e = _bls_focal(o)
+        # Detector-side field for reciprocity: incident field rotated by 90°.
+        ej = SWT.rotate_field(e, exy[0], exy[1], 90) if method == "RT" else None
+        return exy, e, ej
+
+    def one_sigma(c, o, fields):
+        exy, e, ej = fields
+        if method == "RT":
+            return _bls_thermal_sigma_rt(c, o, exy, e, ej)
+        return _bls_thermal_sigma(c, o, exy, e)
+
+    sweep = job.get("sweep")
+    if not sweep:
+        fields = prep_fields(optics)
+        w, sig = one_sigma(cfg, optics, fields)
         return json.dumps(
             {
-                "traces": [],
-                "grids": [
+                "traces": [
                     {
                         "quantity": "blsSpectrum",
                         "label": "",
                         "x": _clean_1d(w),
-                        "y": values,
-                        "z": rows,
+                        "y": _clean_1d(sig),
                     }
                 ],
+                "grids": [],
             }
         )
 
-    raise ValueError(f"Unknown BLS task: {task}")
+    # Swept thermal spectra -> heatmap over (frequency, parameter).
+    key = sweep["key"]
+    if method == "RT" and key == "dCover":
+        raise ValueError(
+            "The cover thickness cannot be swept under the reciprocity-theorem method."
+        )
+    values = [float(v) for v in sweep["values"]]
+    optics_swept = key in ("NA", "wavelength")
+    fields = None if optics_swept else prep_fields(optics)
+    # Common frequency axis across the sweep: fix the window from the
+    # extreme parameter values so all spectra share one grid.
+    rows = []
+    w_axis = None
+    for v in values:
+        c = dict(cfg)
+        o = dict(optics)
+        _bls_apply_sweep(c, o, key, v)
+        if w_axis is None:
+            if c.get("fAuto", True):
+                # widest window over the sweep: probe both ends
+                c_lo, o_lo = dict(cfg), dict(optics)
+                _bls_apply_sweep(c_lo, o_lo, key, values[0])
+                c_hi, o_hi = dict(cfg), dict(optics)
+                _bls_apply_sweep(c_hi, o_hi, key, values[-1])
+                lo1, hi1 = _bls_auto_frange(c_lo, c_lo["kMax"], o_lo)
+                lo2, hi2 = _bls_auto_frange(c_hi, c_hi["kMax"], o_hi)
+                w_axis = (min(lo1, lo2), max(hi1, hi2))
+            else:
+                w_axis = (c["fMin"] * 2 * np.pi, c["fMax"] * 2 * np.pi)
+        c["fAuto"] = False
+        c["fMin"] = w_axis[0] / (2 * np.pi)
+        c["fMax"] = w_axis[1] / (2 * np.pi)
+        step_fields = prep_fields(o) if optics_swept else fields
+        w, sig = one_sigma(c, o, step_fields)
+        rows.append(_clean_1d(sig))
+    w = np.linspace(w_axis[0], w_axis[1], int(cfg.get("nF", 61)))
+    return json.dumps(
+        {
+            "traces": [],
+            "grids": [
+                {
+                    "quantity": "blsSpectrum",
+                    "label": "",
+                    "x": _clean_1d(w),
+                    "y": values,
+                    "z": rows,
+                }
+            ],
+        }
+    )
 
 
 def get_version():

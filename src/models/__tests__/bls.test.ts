@@ -74,6 +74,33 @@ describe('buildBlsJob', () => {
     expect(job.sweep?.values[4]).toBeCloseTo(0.25);
   });
 
+  it('defaults to the Green-function method and carries RT when selected', () => {
+    expect(buildBlsJob(input()).config.method).toBe('GF');
+    const rt = buildBlsJob(input({ values: { ...defaults, method: 'RT' } }));
+    expect(rt.config.method).toBe('RT');
+  });
+
+  it('rejects RT combined with the optical cover layer', () => {
+    expect(() =>
+      buildBlsJob(input({ values: { ...defaults, method: 'RT', coverEnabled: 1 } })),
+    ).toThrow(/reciprocity-theorem method supports only/i);
+  });
+
+  it('rejects sweeping the cover thickness under RT', () => {
+    expect(() =>
+      buildBlsJob(
+        input({
+          values: { ...defaults, method: 'RT' },
+          sweepEnabled: true,
+          sweepKey: 'dCover',
+          sweepFrom: 0,
+          sweepTo: 200,
+          sweepPoints: 3,
+        }),
+      ),
+    ).toThrow(/cover thickness cannot be swept/i);
+  });
+
   it('validates manual frequency window and sweep length', () => {
     expect(() =>
       buildBlsJob(input({ values: { ...defaults, fAuto: 0, fMin: 10, fMax: 5 } })),

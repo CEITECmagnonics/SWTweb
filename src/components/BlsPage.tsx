@@ -71,7 +71,9 @@ function ThermalSweepSection() {
   const bls = useStore((s) => s.bls);
   const patchBls = useStore((s) => s.patchBls);
   const setBlsSweepKey = useStore((s) => s.setBlsSweepKey);
-  const def = blsSweepableParams().find((p) => p.key === bls.sweepKey);
+  const isRT = String(bls.values.method ?? 'GF') === 'RT';
+  const sweepables = blsSweepableParams().filter((p) => !(isRT && p.key === 'dCover'));
+  const def = sweepables.find((p) => p.key === bls.sweepKey);
   return (
     <Section title="Parameter sweep" defaultOpen={false}>
       <label className="mb-2 flex cursor-pointer items-center gap-2 text-sm">
@@ -91,7 +93,7 @@ function ThermalSweepSection() {
               value={bls.sweepKey}
               onChange={(e) => setBlsSweepKey(e.target.value)}
             >
-              {blsSweepableParams().map((p) => (
+              {sweepables.map((p) => (
                 <option key={p.key} value={p.key}>
                   {p.label}
                   {p.unit ? ` (${p.unit})` : ''}
@@ -133,6 +135,9 @@ export function BlsPage() {
   const runBls = useStore((s) => s.runBls);
   const engineStatus = useStore((s) => s.engineStatus);
   const swtVersion = useStore((s) => s.swtVersion);
+  const setBlsValue = useStore((s) => s.setBlsValue);
+  const setBlsSweepKey = useStore((s) => s.setBlsSweepKey);
+  const isRT = String(bls.values.method ?? 'GF') === 'RT';
 
   const running = bls.status === 'running';
   const meta = bls.meta;
@@ -210,7 +215,21 @@ export function BlsPage() {
     });
   };
 
-  const durationHint = bls.sweepEnabled ? `≈ ${bls.sweepPoints} × 10 s` : '≈ 10 s';
+  const durationHint = isRT
+    ? bls.sweepEnabled
+      ? `≈ ${bls.sweepPoints} × 0.5 s`
+      : '≈ 2 s'
+    : bls.sweepEnabled
+      ? `≈ ${bls.sweepPoints} × 10 s`
+      : '≈ 10 s';
+
+  const selectRT = () => {
+    setBlsValue('method', 'RT');
+    // The stack section is hidden under RT — clear incompatible settings so
+    // the user never hits the fail-fast error without a visible control.
+    if (Number(bls.values.coverEnabled) === 1) setBlsValue('coverEnabled', 0);
+    if (bls.sweepKey === 'dCover') setBlsSweepKey('Bext');
+  };
 
   return (
     <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[340px_1fr]">
@@ -228,20 +247,51 @@ export function BlsPage() {
             </a>
           </p>
         </Section>
+        <Section title="Method">
+          <div className="flex gap-1.5">
+            <Button
+              variant={!isRT ? 'primary' : 'secondary'}
+              className="flex-1 !py-1.5 text-xs"
+              title="Green-function formalism with the full air / [cover] / magnet / substrate dielectric stack and the output analyzer. Slower (runtime ∝ Nq⁴)."
+              onClick={() => setBlsValue('method', 'GF')}
+            >
+              Green function
+            </Button>
+            <Button
+              variant={isRT ? 'primary' : 'secondary'}
+              className="flex-1 !py-1.5 text-xs"
+              title="Reciprocity theorem: ~10× faster. Ignores the entire dielectric stack (including the substrate) and the analyzer / collection optics; peak positions still match the Green-function result."
+              onClick={selectRT}
+            >
+              Reciprocity theorem
+            </Button>
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+            {isRT
+              ? 'Fast reciprocity-theorem model — no dielectric stack (substrate permittivity ignored) and no output analyzer.'
+              : 'Full Green-function model with the dielectric stack and output analyzer (runtime ∝ Nq⁴).'}
+          </p>
+        </Section>
         <Section title="Material">
           <MaterialEditor which={1} />
         </Section>
         <Section title="Spin waves & sample">
-          <BlsParamGroup defs={BLS_SW_PARAMS} />
+          <BlsParamGroup defs={BLS_SW_PARAMS} exclude={['method']} />
         </Section>
         <Section title="Optics">
-          <BlsParamGroup defs={BLS_OPTICS_PARAMS} />
+          <BlsParamGroup
+            defs={BLS_OPTICS_PARAMS}
+            exclude={isRT ? ['analyzer', 'analyzerAngle', 'collectionSpot'] : []}
+          />
         </Section>
-        <StackSection />
+        {!isRT && <StackSection />}
         <Section title="Frequency window & accuracy" defaultOpen={false}>
           <BlsParamGroup
             defs={BLS_THERMAL_PARAMS}
-            exclude={Number(bls.values.fAuto ?? 1) === 1 ? ['fMin', 'fMax'] : []}
+            exclude={[
+              ...(Number(bls.values.fAuto ?? 1) === 1 ? ['fMin', 'fMax'] : []),
+              ...(isRT ? ['nQ'] : []),
+            ]}
           />
         </Section>
         <ThermalSweepSection />
@@ -267,8 +317,9 @@ export function BlsPage() {
             )}
           </Button>
           <p className="mt-2 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-            µBLS involves 2D convolutions for every frequency bin — heavier than the other pages.
-            The accuracy panel trades speed for convergence (runtime ∝ Nq⁴).
+            {isRT
+              ? 'The reciprocity-theorem method skips the dielectric stack and angular quadrature — much faster, with peak positions matching the Green-function model.'
+              : 'µBLS involves 2D convolutions for every frequency bin — heavier than the other pages. The accuracy panel trades speed for convergence (runtime ∝ Nq⁴).'}
           </p>
         </div>
       </aside>

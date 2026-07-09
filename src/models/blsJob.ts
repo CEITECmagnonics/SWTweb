@@ -53,6 +53,13 @@ export function buildBlsJob(input: BlsInput): BlsJob {
   };
   const optics = convertGroup(BLS_OPTICS_PARAMS, input.values);
 
+  const method = String(config.method ?? 'GF');
+  if (method === 'RT' && Number(config.coverEnabled) === 1) {
+    throw new Error(
+      'The reciprocity-theorem method supports only air / magnetic layer / substrate — disable the cover layer or use the Green-function method.',
+    );
+  }
+
   // thermal
   const thermal = convertGroup(BLS_THERMAL_PARAMS, input.values);
   config.fAuto = Number(thermal.fAuto) === 1 ? 1 : 0;
@@ -67,6 +74,11 @@ export function buildBlsJob(input: BlsInput): BlsJob {
 
   const job: BlsJob = { task: 'thermal', config, optics };
   if (input.sweepEnabled) {
+    if (method === 'RT' && input.sweepKey === 'dCover') {
+      throw new Error(
+        'The cover thickness cannot be swept under the reciprocity-theorem method.',
+      );
+    }
     const def = blsSweepableParams().find((p) => p.key === input.sweepKey);
     if (!def) throw new Error(`Parameter "${input.sweepKey}" cannot be swept here.`);
     if (input.sweepPoints > 51) throw new Error('BLS sweeps are limited to 51 steps (each step is a full spectrum).');

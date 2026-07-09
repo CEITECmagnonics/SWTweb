@@ -84,6 +84,7 @@ describe('share URL state', () => {
       macrospinValues: { ...base.macrospinValues, theta_H: 35 },
       bls: {
         ...base.bls,
+        values: { ...base.bls.values, method: 'RT' },
         sweepEnabled: true,
         sweepKey: 'NA',
         sweepFrom: 0.2,
@@ -103,6 +104,8 @@ describe('share URL state', () => {
     expect(patch?.macrospinValues?.theta_H).toBe(35);
     expect(patch?.bls?.sweepEnabled).toBe(true);
     expect(patch?.bls?.sweepKey).toBe('NA');
+    // string choice values survive the share cleaner
+    expect(patch?.bls?.values.method).toBe('RT');
   });
 
   it('builds, parses, and strips hash-local share URLs', () => {
