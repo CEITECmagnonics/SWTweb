@@ -60,6 +60,18 @@ export const BLS_SW_PARAMS: ParamDef[] = [
     tooltip: 'Temperature of the Bose–Einstein magnon distribution (thermal spectra).',
   },
   {
+    key: 'mu',
+    label: 'Chemical potential',
+    symbol: '\\mu/h',
+    unit: 'GHz',
+    toSI: 1e9,
+    default: -1000,
+    kind: 'number',
+    advanced: true,
+    tooltip:
+      'Chemical potential of the magnon gas in the Bose–Einstein factor n(f) = 1/(exp((h f − µ)/kB T) − 1), entered as the frequency µ/h (GHz). Must stay below the lowest magnon frequency, otherwise the Bose factor diverges. The default (−1000 GHz) reproduces the SpinWaveToolkit example.',
+  },
+  {
     key: 'nModes',
     label: 'Thickness modes',
     symbol: 'N',
@@ -316,7 +328,7 @@ export const BLS_THERMAL_PARAMS: ParamDef[] = [
     toSI: 1,
     default: 61,
     min: 11,
-    max: 301,
+    max: 3001,
     step: 2,
     kind: 'int',
     advanced: true,
@@ -329,7 +341,7 @@ export const BLS_THERMAL_PARAMS: ParamDef[] = [
     toSI: 1,
     default: 48,
     min: 16,
-    max: 128,
+    max: 1024,
     step: 2,
     kind: 'int',
     advanced: true,
@@ -357,6 +369,17 @@ export const BLS_SWEEPABLE_KEYS = ['Bext', 'd', 'NA', 'wavelength', 'dCover', 't
 export function blsSweepableParams(): ParamDef[] {
   const all = [...BLS_SW_PARAMS, ...BLS_OPTICS_PARAMS, ...BLS_STACK_PARAMS];
   return BLS_SWEEPABLE_KEYS.map((k) => all.find((p) => p.key === k)!).filter(Boolean);
+}
+
+/**
+ * Transpose a sweep grid stored as z[paramIndex][freqIndex] into the plot
+ * orientation z[freqIndex][paramIndex] (frequency on the vertical axis).
+ */
+export function transposeSweepGrid(
+  z: (number | null)[][],
+  freqCount: number,
+): (number | null)[][] {
+  return Array.from({ length: freqCount }, (_, fi) => z.map((row) => row[fi] ?? null));
 }
 
 export const BLS_ALL_PARAMS: ParamDef[] = [

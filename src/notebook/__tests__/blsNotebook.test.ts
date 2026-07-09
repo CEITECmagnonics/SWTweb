@@ -43,6 +43,8 @@ describe('generateBlsNotebook', () => {
     expect(nb).toContain('get_signal_GF_focal');
     expect(nb).toContain('ObjectiveLens');
     expect(nb).toContain('GetBlochFunction');
+    // chemical potential threaded as an energy (µ = h·µ/h)
+    expect(nb).toContain('mu=SWT.H *');
     expect(nb).toContain('10.1103/PhysRevB.110.224428');
     expect(nb).toContain('10.1088/1361-648X/ae6430');
     // detection optics mirror the bridge call (quotes JSON-escaped in .ipynb)
@@ -71,6 +73,30 @@ describe('generateBlsNotebook', () => {
     expect(nb).toContain('sweep_values');
     expect(nb).toContain('Bext=value');
     expect(nb).toContain('pcolormesh');
+    // frequency on the vertical axis, swept parameter on the horizontal axis
+    expect(nb).toContain('pcolormesh(sweep_values, w_common / 2 / np.pi / 1e9, spectra.T');
+    expect(nb).toContain('ax.set_ylabel(\\"Frequency (GHz)\\")');
+  });
+
+  it('omits the unused Ku from a custom-material notebook', () => {
+    const job = buildBlsJob({
+      mode: 'thermal',
+      material: { ...getMaterialPreset('custom').values, Ku: 2e-3 },
+      values: defaults,
+      sweepEnabled: false,
+      sweepKey: 'Bext',
+      sweepFrom: 0,
+      sweepTo: 0,
+      sweepPoints: 2,
+    });
+    const nb = generateBlsNotebook({
+      job,
+      meta: makeMeta(job),
+      materialPresetId: 'custom',
+      swtVersion: '1.3.0',
+    });
+    expect(nb).toContain('SWT.Material(');
+    expect(nb).not.toContain('Ku=');
   });
 
   it('produces an RT notebook without the dielectric stack or analyzer', () => {

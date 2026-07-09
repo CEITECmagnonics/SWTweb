@@ -74,6 +74,21 @@ export interface PlotTrace {
   provenance: Provenance;
 }
 
+/** A pinned single µBLS spectrum, overlaid on the µBLS plot (non-sweep mode). */
+export interface BlsTrace {
+  id: string;
+  runId: number;
+  runLabel: string;
+  /** frequency (GHz) */
+  x: number[];
+  /** BLS intensity (arb. u.) */
+  y: (number | null)[];
+  visible: boolean;
+  color: string;
+  dash: DashStyle;
+  paramsDisplay: Record<string, string>;
+}
+
 export interface GridResult {
   runId: number;
   runLabel: string;
@@ -137,6 +152,9 @@ export interface BlsState {
   error: string | null;
   result: BlsResult | null;
   meta: BlsMeta | null;
+  /** Pinned single spectra overlaid on the plot (non-sweep mode only). */
+  traces: BlsTrace[];
+  runCounter: number;
 }
 
 export interface SweepMeta {
@@ -269,6 +287,9 @@ interface AppState {
   setBlsValue: (key: string, value: number | string | null) => void;
   setBlsSweepKey: (key: string) => void;
   runBls: () => Promise<void>;
+  updateBlsTrace: (id: string, patch: Partial<BlsTrace>) => void;
+  removeBlsTrace: (id: string) => void;
+  clearBlsTraces: () => void;
 }
 
 function defaultParamValues(modelId: ModelId): ParamValues {
@@ -304,6 +325,7 @@ const initialQuantities = Object.fromEntries(
 
 let engine: SwtEngine | null = null;
 let traceIdCounter = 1;
+let blsTraceIdCounter = 1;
 
 function prefersDark(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -333,6 +355,8 @@ function initialBlsState(): BlsState {
     error: null,
     result: null,
     meta: null,
+    traces: [],
+    runCounter: 0,
   };
 }
 
@@ -795,11 +819,56 @@ export const useStore = create<AppState>((set, get) => ({
         paramsDisplay: describeGroup(BLS_ALL_PARAMS, get().bls.values),
         timestamp: new Date().toISOString(),
       };
-      set((s2) => ({ bls: { ...s2.bls, status: 'idle', result, meta } }));
+      set((s2) => {
+        // A single spectrum is pinned as an overlaid trace (like the dispersion
+        // page). A parameter sweep produces a 2D map, which traces don't apply
+        // to, so leave the trace list (and run counter) untouched.
+        if (job.sweep) {
+          return { bls: { ...s2.bls, status: 'idle', result, meta } };
+        }
+        const spectrum = result.traces.find((t) => t.quantity === 'blsSpectrum');
+        if (!spectrum) {
+          return { bls: { ...s2.bls, status: 'idle', result, meta } };
+        }
+        const runId = s2.bls.runCounter + 1;
+        const preset = getMaterialPreset(get().materialPresetId);
+        const trace: BlsTrace = {
+          id: `b${blsTraceIdCounter++}`,
+          runId,
+          runLabel: `Run ${runId} · ${preset.label.split(' ')[0]}`,
+          x: spectrum.x.map((w) => w / (2 * Math.PI * 1e9)),
+          y: spectrum.y,
+          visible: true,
+          color: TRACE_PALETTE[s2.bls.traces.length % TRACE_PALETTE.length],
+          dash: 'solid',
+          paramsDisplay: meta.paramsDisplay,
+        };
+        return {
+          bls: {
+            ...s2.bls,
+            status: 'idle',
+            result,
+            meta,
+            traces: [...s2.bls.traces, trace],
+            runCounter: runId,
+          },
+        };
+      });
     } catch (err) {
       set((s2) => ({ bls: { ...s2.bls, status: 'idle', error: errorMessage(err) } }));
     }
   },
+
+  updateBlsTrace: (id, patch) =>
+    set((s) => ({
+      bls: { ...s.bls, traces: s.bls.traces.map((t) => (t.id === id ? { ...t, ...patch } : t)) },
+    })),
+
+  removeBlsTrace: (id) =>
+    set((s) => ({ bls: { ...s.bls, traces: s.bls.traces.filter((t) => t.id !== id) } })),
+
+  clearBlsTraces: () =>
+    set((s) => ({ bls: { ...s.bls, traces: [], result: null, meta: null } })),
 }));
 
 function normalizeResult(

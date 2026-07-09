@@ -86,7 +86,12 @@ export function pyKwargs(obj: Record<string, number | string | Matrix3> | undefi
     .join(', ');
 }
 
-export function materialCode(varName: string, presetId: string, values: MaterialValues): string {
+export function materialCode(
+  varName: string,
+  presetId: string,
+  values: MaterialValues,
+  opts: { omitKu?: boolean } = {},
+): string {
   const preset = getMaterialPreset(presetId);
   if (preset.swtName) {
     return `${varName} = SWT.${preset.swtName}  # predefined material`;
@@ -98,7 +103,8 @@ export function materialCode(varName: string, presetId: string, values: Material
     `    alpha=${py(values.alpha)},  # Gilbert damping`,
     `    gamma=${py(values.gamma)},  # gyromagnetic ratio (rad*Hz/T)`,
     `    mu0dH0=${py(values.mu0dH0)},  # inhomogeneous broadening (T)`,
-    `    Ku=${py(values.Ku)},        # surface anisotropy (J/m^2)`,
+    // Ku (surface anisotropy) is unused by the µBLS calculation.
+    ...(opts.omitKu ? [] : [`    Ku=${py(values.Ku)},        # surface anisotropy (J/m^2)`]),
     `)`,
   ].join('\n');
 }

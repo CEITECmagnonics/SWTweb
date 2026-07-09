@@ -46,8 +46,12 @@ export function blsDefaultSweepRange(def: ParamDef): { from: number; to: number;
 }
 
 export function buildBlsJob(input: BlsInput): BlsJob {
+  // Ku (surface anisotropy) is unused by the BLS calculation — keep it off the
+  // µBLS path so it is neither sent to the bridge nor written to the notebook.
+  const material = { ...input.material };
+  delete (material as Partial<MaterialValues>).Ku;
   const config: BlsJob['config'] = {
-    material: input.material,
+    material,
     ...convertGroup(BLS_SW_PARAMS, input.values),
     ...convertGroup(BLS_STACK_PARAMS, input.values),
   };
